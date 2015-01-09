@@ -21,25 +21,29 @@ class GrizzlyHttpParser {
     // this is package private because of the test
     static final int BUFFER_MAX_SIZE = 40000;
     static final int INIT_BUFFER_SIZE = 1024;
-    static final int MAX_HTTP_HEADER_SIZE = 1000;
 
-    private final GrizzlyHttpParserUtils.HeaderParsingState headerParsingState = new GrizzlyHttpParserUtils.HeaderParsingState(MAX_HTTP_HEADER_SIZE);
+    private final GrizzlyHttpParserUtils.HeaderParsingState headerParsingState;
 
     private volatile ByteBuffer buffer = ByteBuffer.allocate(INIT_BUFFER_SIZE);
     private volatile boolean headerParsed;
-    private volatile boolean complete;
     private volatile boolean expectContent;
     private volatile String protocolVersion;
     private volatile int code;
 
     private volatile HttpResponse httpResponse;
     private volatile GrizzlyTransferEncodingParser transferEncodingParser;
+    private volatile boolean complete;
+
+    GrizzlyHttpParser(int maxHeaderSize) {
+        headerParsingState = new GrizzlyHttpParserUtils.HeaderParsingState(maxHeaderSize);
+    }
 
     void reset(boolean expectContent) {
         this.expectContent = expectContent;
-        complete = false;
         headerParsed = false;
         buffer.clear();
+        buffer.flip();
+        complete = false;
         headerParsingState.recycle();
     }
 
@@ -60,18 +64,16 @@ class GrizzlyHttpParser {
             input = Utils.appendBuffers(buffer, input, BUFFER_MAX_SIZE, BUFFER_STEP_SIZE);
         }
 
-        if (!headerParsed && parseHeader(input)) {
+        if (!headerParsed && !parseHeader(input)) {
+            saveRemaining(input);
             return;
         }
 
         if (expectContent) {
-            complete = transferEncodingParser.parse(input);
-
-            if (!complete) {
-                buffer.compact();
-                if (input.hasRemaining() && input != buffer) {
-                    buffer = Utils.appendBuffers(buffer, input, BUFFER_MAX_SIZE, BUFFER_STEP_SIZE);
-                }
+            if (transferEncodingParser.parse(input)) {
+                complete = true;
+            } else {
+                saveRemaining(input);
             }
         } else { // We don't expect content
             complete = true;
@@ -79,6 +81,30 @@ class GrizzlyHttpParser {
 
         if (complete && input.hasRemaining()) {
             throw new ParseException("Unknown data remain in the buffer after the HTTP response has been parsed");
+        }
+
+        if (complete) {
+            httpResponse.getBodyStream().closeQueue();
+        }
+    }
+
+    private void saveRemaining(ByteBuffer input) {
+
+        headerParsingState.start = headerParsingState.start - input.position() >= 0 ? headerParsingState.start - input.position() : 0;
+        headerParsingState.offset = headerParsingState.offset - input.position() >= 0 ? headerParsingState.offset - input.position() : 0;
+        headerParsingState.packetLimit = headerParsingState.packetLimit - input.position() >= 0 ? headerParsingState.packetLimit - input.position() : 0;
+        headerParsingState.checkpoint = headerParsingState.checkpoint - input.position() >= 0 ? headerParsingState.checkpoint - input.position() : -1;
+        headerParsingState.checkpoint2 = headerParsingState.checkpoint2 - input.position() >= 0 ? headerParsingState.checkpoint2 - input.position() : 0;
+
+        if (input.hasRemaining()) {
+            if (input != buffer) {
+                buffer.clear();
+                buffer.flip();
+                buffer = Utils.appendBuffers(buffer, input, BUFFER_MAX_SIZE, BUFFER_STEP_SIZE);
+            } else {
+                buffer.compact();
+                buffer.flip();
+            }
         }
     }
 
@@ -107,6 +133,7 @@ class GrizzlyHttpParser {
                 input.position(headerParsingState.offset);
                 // if headers get parsed - set the flag
                 headerParsed = true;
+                decideTransferEncoding();
 
                 // recycle header parsing state
                 headerParsingState.recycle();
@@ -161,7 +188,7 @@ class GrizzlyHttpParser {
                         return false;
                     }
 
-                    code = parseInt(input, headerParsingState.start, 3);
+                    code = parseInt(input, headerParsingState.start, headerParsingState.start + 3);
 
                     headerParsingState.start = -1;
                     headerParsingState.offset += 3;
@@ -193,7 +220,6 @@ class GrizzlyHttpParser {
                     headerParsingState.start = -1;
                     headerParsingState.checkpoint = -1;
                     httpResponse = new HttpResponse(protocolVersion, code, reasonPhrase);
-                    decideTransferEncoding();
                     if (httpResponse.getStatusCode() == 100) {
                         // reset the parsing state in preparation to parse
                         // another initial line which represents the final
@@ -215,7 +241,7 @@ class GrizzlyHttpParser {
         }
     }
 
-    private boolean parseHeadersFromBuffer(final ByteBuffer input) throws ParseException {
+    boolean parseHeadersFromBuffer(final ByteBuffer input) throws ParseException {
         do {
             if (headerParsingState.subState == 0) {
                 final int eol = checkEOL(input);
@@ -301,7 +327,7 @@ class GrizzlyHttpParser {
             byte b = input.get(offset);
             if (b == GrizzlyHttpParserUtils.COLON) {
 
-                headerParsingState.headerName = parseString(input, start, offset - start);
+                headerParsingState.headerName = parseString(input, start, offset);
                 headerParsingState.offset = offset + 1;
 
                 return true;
@@ -339,7 +365,7 @@ class GrizzlyHttpParser {
                     } else {
                         headerParsingState.offset = offset + 1;
                         String value = parseString(input,
-                                headerParsingState.start, headerParsingState.start - headerParsingState.checkpoint2);
+                                headerParsingState.start, headerParsingState.checkpoint2);
                         httpResponse.addHeader(headerParsingState.headerName, value);
                         return 0;
                     }
@@ -485,18 +511,20 @@ class GrizzlyHttpParser {
     }
 
 
-    private String parseString(ByteBuffer input, int startIdx, int length) throws ParseException {
-        byte[] bytes = new byte[length];
-        input.get(bytes, startIdx, length);
+    private String parseString(ByteBuffer input, int startIdx, int endIdx) throws ParseException {
+        byte[] bytes = new byte[endIdx - startIdx];
+        input.position(startIdx);
+        input.get(bytes, 0, endIdx - startIdx);
         try {
             return new String(bytes, ENCODING);
         } catch (UnsupportedEncodingException e) {
             throw new ParseException("Unsuported encoding: " + ENCODING, e);
         }
+
     }
 
-    private int parseInt(ByteBuffer input, int startIdx, int length) throws ParseException {
-        String value = parseString(input, startIdx, length);
+    private int parseInt(ByteBuffer input, int startIdx, int endIdx) throws ParseException {
+        String value = parseString(input, startIdx, endIdx);
         return Integer.valueOf(value);
     }
 

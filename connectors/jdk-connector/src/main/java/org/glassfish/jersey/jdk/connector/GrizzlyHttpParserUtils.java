@@ -20,8 +20,6 @@ class GrizzlyHttpParserUtils {
     static final byte a = (byte) 'a';
     static final byte LC_OFFSET = A - a;
 
-    static final String HTTP_HEAD = "HEAD";
-
     static int skipSpaces(final ByteBuffer input, int offset,
                           final int packetLimit) {
         final int limit = Math.min(input.limit(), packetLimit);
@@ -68,7 +66,7 @@ class GrizzlyHttpParserUtils {
             packetLimit = offset + maxHeaderSize;
         }
 
-        public void recycle() {
+        void recycle() {
             state = 0;
             subState = 0;
             start = 0;
@@ -80,10 +78,10 @@ class GrizzlyHttpParserUtils {
             contentLengthsDiffer = false;
         }
 
-        public final void checkOverflow(final String errorDescriptionIfOverflow) {
+        void checkOverflow(final String errorDescriptionIfOverflow) throws ParseException {
             if (offset < packetLimit) return;
 
-            throw new IllegalStateException(errorDescriptionIfOverflow);
+            throw new ParseException(errorDescriptionIfOverflow);
         }
     }
 
@@ -108,28 +106,6 @@ class GrizzlyHttpParserUtils {
             remainderBytesRead = 0;
             trailerHeaders.clear();
             contentDecodingRemainders = null;
-//            Arrays.fill(contentDecodingRemainders, null);
-        }
-
-        private ByteBuffer removeContentDecodingRemainder(final int i) {
-            if (contentDecodingRemainders == null ||
-                    i >= contentDecodingRemainders.length) {
-                return null;
-            }
-
-            final ByteBuffer remainder = contentDecodingRemainders[i];
-            contentDecodingRemainders[i] = null;
-            return remainder;
-        }
-
-        private void setContentDecodingRemainder(final int i, final ByteBuffer remainder) {
-            if (contentDecodingRemainders == null) {
-                contentDecodingRemainders = new ByteBuffer[i + 1];
-            } else if (i >= contentDecodingRemainders.length) {
-                contentDecodingRemainders = Arrays.copyOf(contentDecodingRemainders, i + 1);
-            }
-
-            contentDecodingRemainders[i] = remainder;
         }
 
     }

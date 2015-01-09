@@ -64,7 +64,6 @@ abstract class GrizzlyTransferEncodingParser {
         private static final long CHUNK_SIZE_OVERFLOW = Long.MAX_VALUE >> 4;
 
         private static final int CHUNK_LENGTH_PARSED_STATE = 3;
-        private static final byte[] LAST_CHUNK_CRLF_BYTES = "0\r\n".getBytes(Charset.forName("ASCII"));
 
         static final int[] DEC = {
                 -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
@@ -90,7 +89,7 @@ abstract class GrizzlyTransferEncodingParser {
         private final ByteBufferInputStream responseBody;
         private final GrizzlyHttpParser httpParser;
         // TODO
-        private final int maxHeadersSize = 100;
+        private final int maxHeadersSize = 1000;
 
         ChunkedEncodingParser(ByteBufferInputStream responseBody, GrizzlyHttpParser httpParser, GrizzlyHttpParserUtils.HeaderParsingState headerParsingState) {
             this.responseBody = responseBody;
@@ -103,14 +102,11 @@ abstract class GrizzlyTransferEncodingParser {
 
             while (input.hasRemaining()) {
 
-                // if it's chunked HTTP message
                 boolean isLastChunk = contentParsingState.isLastChunk;
                 // Check if HTTP chunk length was parsed
                 if (!isLastChunk && contentParsingState.chunkRemainder <= 0) {
-                    // We expect next chunk header
-                    input = parseTrailerCRLF(input);
-                    if (input == null) {
-                        // TODO
+                    if (!parseTrailerCRLF(input)) {
+                        return false;
                     }
 
                     if (!parseHttpChunkLength(input)) {
@@ -120,7 +116,8 @@ abstract class GrizzlyTransferEncodingParser {
                     }
                 } else {
                     // HTTP content starts from position 0 in the input Buffer (HTTP chunk header is not part of the input Buffer)
-                    contentParsingState.chunkContentStart = 0;
+                    //contentParsingState.chunkContentStart = 0;
+                    contentParsingState.chunkContentStart = input.position();
                 }
 
                 // Get the position in the input Buffer, where actual HTTP content starts
@@ -149,6 +146,7 @@ abstract class GrizzlyTransferEncodingParser {
                 }
 
                 if (isLastChunk) {
+                    input.position(chunkContentStart);
                     return true;
                 }
 
@@ -158,13 +156,19 @@ abstract class GrizzlyTransferEncodingParser {
                 // Get the number of content bytes available in the current input Buffer
                 final int contentAvailable = input.limit() - chunkContentStart;
 
+                input.position(chunkContentStart);
                 ByteBuffer data;
                 if (contentAvailable > thisPacketRemaining) {
                     // If input Buffer has part of the next message - slice it
                     data = Utils.split(input, (int) (chunkContentStart + thisPacketRemaining));
 
                 } else {
-                    data = Utils.split(input, input.remaining());
+                    data = Utils.split(input, chunkContentStart + input.remaining());
+                }
+
+                if (data.hasRemaining()) { // if input still has some data
+                    // recalc the HTTP chunk remaining content
+                    contentParsingState.chunkRemainder -= data.remaining();
                 }
 
                 try {
@@ -172,17 +176,12 @@ abstract class GrizzlyTransferEncodingParser {
                 } catch (InterruptedException e) {
                     //TODO
                 }
-
-                if (input.hasRemaining()) { // if input still has some data
-                    // recalc the HTTP chunk remaining content
-                    contentParsingState.chunkRemainder -= input.remaining();
-                }
             }
 
             return false;
         }
 
-        boolean parseHttpChunkLength(final ByteBuffer input) throws ParseException {
+        private boolean parseHttpChunkLength(final ByteBuffer input) throws ParseException {
             while (true) {
                 switch (headerParsingState.state) {
                     case 0: {// Initialize chunk parsing
@@ -248,23 +247,23 @@ abstract class GrizzlyTransferEncodingParser {
             }
         }
 
-        ByteBuffer parseTrailerCRLF(ByteBuffer input) {
+        private boolean parseTrailerCRLF(ByteBuffer input) {
             if (headerParsingState.state == CHUNK_LENGTH_PARSED_STATE) {
                 while (input.hasRemaining()) {
                     if (input.get() == GrizzlyHttpParserUtils.LF) {
                         headerParsingState.recycle();
                         if (input.hasRemaining()) {
-                            return input.slice();
+                            return true;
                         }
 
-                        return null;
+                        return false;
                     }
                 }
 
-                return null;
+                return false;
             }
 
-            return input;
+            return true;
         }
 
         /**
@@ -284,7 +283,7 @@ abstract class GrizzlyTransferEncodingParser {
             headerParsingState.packetLimit = start + maxHeadersSize;
         }
 
-        boolean parseLastChunkTrailer(final ByteBuffer input) throws ParseException {
+        private boolean parseLastChunkTrailer(final ByteBuffer input) throws ParseException {
             boolean result = httpParser.parseHeadersFromBuffer(input);
             if (!result) {
                 headerParsingState.checkOverflow("The chunked encoding trailer header is too large");
