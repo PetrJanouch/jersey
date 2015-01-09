@@ -353,6 +353,15 @@ class GrizzlyHttpParser {
 
         while (offset < limit) {
             final byte b = input.get(offset);
+            if (b == GrizzlyHttpParserUtils.COMMA) {
+                headerParsingState.offset = offset + 1;
+                String value = parseString(input,
+                        headerParsingState.start, headerParsingState.checkpoint2);
+                httpResponse.addHeader(headerParsingState.headerName, value);
+                headerParsingState.start = headerParsingState.checkpoint2;
+                return -2;
+            }
+
             if (b == GrizzlyHttpParserUtils.CR) {
             } else if (b == GrizzlyHttpParserUtils.LF) {
                 // Check if it's not multi line header
