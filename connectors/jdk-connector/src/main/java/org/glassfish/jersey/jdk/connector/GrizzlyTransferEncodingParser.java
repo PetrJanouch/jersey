@@ -166,10 +166,7 @@ abstract class GrizzlyTransferEncodingParser {
                     data = Utils.split(input, chunkContentStart + input.remaining());
                 }
 
-                if (data.hasRemaining()) { // if input still has some data
-                    // recalc the HTTP chunk remaining content
                     contentParsingState.chunkRemainder -= data.remaining();
-                }
 
                 try {
                     responseBody.put(data);

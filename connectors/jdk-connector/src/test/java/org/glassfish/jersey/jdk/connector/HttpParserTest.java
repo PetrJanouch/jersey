@@ -1,7 +1,5 @@
 package org.glassfish.jersey.jdk.connector;
 
-import org.glassfish.grizzly.memory.Buffers;
-import org.glassfish.grizzly.utils.Pair;
 import org.glassfish.jersey.internal.util.collection.ByteBufferInputStream;
 import org.junit.Before;
 import org.junit.Test;
@@ -316,6 +314,26 @@ public class HttpParserTest {
     }
 
     @Test
+    public void testChunkExtension() throws ParseException, IOException {
+        httpParser.reset(true);
+
+        StringBuilder response = new StringBuilder();
+        response.append("HTTP/1.1 123 A meaningful code\r\n")
+                .append("transfer-coding: chunked\r\n\r\n");
+
+        String body = "ABCDE";
+        String bodyLen = Integer.toHexString(body.length());
+        response.append(bodyLen).append(";extName=extValue").append("\r\n").append(body).append("\r\n");
+        response.append("0;extName2=extValue2").append("\r\n").append("\r\n");
+
+        feedParser(response.toString(), Integer.MAX_VALUE);
+
+        assertTrue(httpParser.isHeaderParsed());
+        assertTrue(httpParser.isComplete());
+        verifyReceivedBody(body);
+    }
+
+    @Test
     public void testSameHeaders() throws ParseException {
         httpParser.reset(false);
         StringBuilder request = new StringBuilder();
@@ -341,7 +359,7 @@ public class HttpParserTest {
         request.append("HTTP/1.1 123 A meaningful code\r\n")
                 .append("name1: value1\r\n")
                 .append("name2: value2, value4\r\n")
-                .append("name3: value3\r\n\n");
+                .append("name3: value3\r\n\r\n");
         feedParser(request.toString(), Integer.MAX_VALUE);
 
         assertTrue(httpParser.isHeaderParsed());
@@ -390,6 +408,7 @@ public class HttpParserTest {
 
     private void testOverflow(String response, int maxHeaderSize) throws ParseException {
         httpParser = new GrizzlyHttpParser(maxHeaderSize);
+        httpParser.reset(false);
         feedParser(response, Integer.MAX_VALUE);
     }
 

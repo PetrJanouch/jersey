@@ -11,15 +11,19 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
 
     private static String TRANSFER_CODING_HEADER = "transfer-coding";
     private static String TRANSFER_CODING_CHUNKED = "chunked";
+    private static String HEAD_METHOD = "HEAD";
+    private static String CONNECT_METHOD = "CONNECT";
 
-    private volatile boolean expectingReply = false;
+    private final GrizzlyHttpParser httpParser;
+    private boolean expectingReply = false;
     /**
      * Constructor.
      *
      * @param downstreamFilter downstream filter. Accessible directly as {@link #downstreamFilter} protected field.
      */
-    HttpFilter(Filter downstreamFilter) {
+    HttpFilter(Filter downstreamFilter, int maxHeaderSize) {
         super(downstreamFilter);
+        this.httpParser = new GrizzlyHttpParser(maxHeaderSize);
     }
 
     @Override
@@ -50,10 +54,8 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
             case CHUNKED: {
                 ChunkedResponseOutputStream chunkOutputStream = new ChunkedResponseOutputStream(downstreamFilter, httpRequest.getChunkSize()) {
                     @Override
-                    public void close() throws IOException {
-                        super.close();
-                        expectingReply = true;
-                        completionHandler.completed(httpRequest);
+                    void onClosed() {
+                        prepareForReply(httpRequest, completionHandler);
                     }
                 };
 
@@ -64,9 +66,8 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
             case STREAMING: {
                 ResponseOutputStream streamingOutputStream = new ResponseOutputStream(downstreamFilter) {
                     @Override
-                    public void close() {
-                        expectingReply = true;
-                        completionHandler.completed(httpRequest);
+                    void onClosed() {
+                        prepareForReply(httpRequest, completionHandler);
                     }
                 };
 
@@ -83,8 +84,7 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
 
                     @Override
                     public void completed(ByteBuffer result) {
-                        expectingReply = true;
-                        completionHandler.completed(httpRequest);
+                        prepareForReply(httpRequest, completionHandler);
                     }
                 });
 
@@ -100,21 +100,50 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
                 break;
             }
 
-            case BUFFERED: {
-                int bodySize = httpRequest.getBufferedBody().limit();
-                httpRequest.addHeader(HttpHeaders.CONTENT_LENGTH, Integer.toString(bodySize));
+            case BUFFERED:
+            case STREAMING:{
+                httpRequest.addHeader(HttpHeaders.CONTENT_LENGTH, Integer.toString(httpRequest.getBodySize()));
+                break;
             }
         }
     }
 
+    private void prepareForReply(HttpRequest httpRequest, CompletionHandler<HttpRequest> completionHandler) {
+        expectingReply = true;
+        completionHandler.completed(httpRequest);
+
+        boolean expectResponseBody = true;
+
+        if(HEAD_METHOD.equals(httpRequest.getMethod()) || CONNECT_METHOD.equals(httpRequest.getMethod())) {
+            expectResponseBody = false;
+        }
+
+        httpParser.reset(expectResponseBody);
+    }
+
     @Override
     boolean processRead(ByteBuffer data) {
+
         if (!expectingReply) {
             onError(new IllegalStateException("Received unexpected Response"));
             return false;
         }
 
-       // upstreamFilter.onRead(new HttpResponse());
+        boolean headerParsed = httpParser.isHeaderParsed();
+        try {
+            httpParser.parse(data);
+        } catch (ParseException e) {
+            onError(e);
+        }
+
+        if (!headerParsed && httpParser.isHeaderParsed()) {
+            upstreamFilter.onRead(httpParser.getHttpResponse());
+        }
+
+        if (httpParser.isComplete()) {
+            httpParser.getHttpResponse().getBodyStream().closeQueue();
+        }
+
         return false;
     }
 }

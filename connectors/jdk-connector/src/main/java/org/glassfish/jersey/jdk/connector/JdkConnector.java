@@ -39,31 +39,256 @@
  */
 package org.glassfish.jersey.jdk.connector;
 
-import org.glassfish.jersey.client.ClientRequest;
-import org.glassfish.jersey.client.ClientResponse;
+import jersey.repackaged.com.google.common.util.concurrent.SettableFuture;
+import org.glassfish.jersey.client.*;
 import org.glassfish.jersey.client.spi.AsyncConnectorCallback;
 import org.glassfish.jersey.client.spi.Connector;
+import org.glassfish.jersey.message.internal.OutboundMessageContext;
 
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.SSLContext;
+import javax.ws.rs.client.Client;
+import javax.ws.rs.core.Configuration;
+import javax.ws.rs.core.Response;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
+import java.net.URI;
+import java.nio.ByteBuffer;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * @author Petr Janouch (petr.janouch at oracle.com)
  */
-public class JdkConnector implements Connector {
+class JdkConnector implements Connector {
 
-    @Override
-    public ClientResponse apply(ClientRequest request) {
-        return null;
+    /**
+     * Input buffer that is used by {@link org.glassfish.jersey.jdk.connector.TransportFilter} when SSL is turned on.
+     * The size cannot be smaller than a maximal size of a SSL packet, which is 16kB for payload + header, because
+     * {@link org.glassfish.jersey.jdk.connector.SslFilter} does not have its own buffer for buffering incoming
+     * data and therefore the entire SSL packet must fit into {@link org.glassfish.jersey.jdk.connector.SslFilter}
+     * input buffer.
+     */
+    private static final int SSL_INPUT_BUFFER_SIZE = 17_000;
+    /**
+     * Input buffer that is used by {@link org.glassfish.jersey.jdk.connector.TransportFilter} when SSL is not turned on.
+     */
+    private static final int INPUT_BUFFER_SIZE = 2048;
+
+    private static final int DEFAULT_MAX_HEADER_SIZE = Integer.MAX_VALUE;
+
+    private static final Logger LOGGER = Logger.getLogger(JdkConnector.class.getName());
+
+    private final boolean fixLengthStreaming;
+    private final int chunkSize;
+    private final Configuration config;
+
+    JdkConnector(Configuration config, boolean fixLengthStreaming, int chunkSize) {
+        this.fixLengthStreaming = fixLengthStreaming;
+        this.chunkSize = chunkSize;
+        this.config = config;
     }
 
     @Override
-    public Future<?> apply(ClientRequest request, AsyncConnectorCallback callback) {
+    public ClientResponse apply(ClientRequest request) {
+
+        Future<?> future = apply(request, new AsyncConnectorCallback() {
+            @Override
+            public void response(ClientResponse response) {
+
+            }
+
+            @Override
+            public void failure(Throwable failure) {
+
+            }
+        });
+
+        try {
+            return (ClientResponse)future.get();
+        } catch (Exception e) {
+            // TODO
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public Future<?> apply(final ClientRequest request, AsyncConnectorCallback callback) {
+        SettableFuture<ClientResponse> responseFuture = SettableFuture.create();
+        Filter<HttpRequest, HttpResponse, ?, ?> httpConnection = createHttpConnection(request, callback, responseFuture);
+
+        final Object entity = request.getEntity();
+        HttpRequest httpRequest;
+        if (entity != null) {
+            final CountDownLatch writeLatch = new CountDownLatch(1);
+            HttpRequest.OutputStreamListener outputListener = new HttpRequest.OutputStreamListener() {
+
+                @Override
+                public void onReady(final OutputStream outputStream) {
+                    request.setStreamProvider(new OutboundMessageContext.StreamProvider() {
+
+                        @Override
+                        public OutputStream getOutputStream(int contentLength) throws IOException {
+                            return outputStream;
+                        }
+                    });
+                    writeLatch.countDown();
+                }
+            };
+
+            RequestEntityProcessing entityProcessing = request.resolveProperty(
+                    ClientProperties.REQUEST_ENTITY_PROCESSING, RequestEntityProcessing.class);
+
+
+            if (entityProcessing == null || entityProcessing != RequestEntityProcessing.BUFFERED) {
+                final int length = request.getLength();
+                if (fixLengthStreaming && length > 0) {
+                    httpRequest = HttpRequest.createStreamed(request.getMethod(), request.getUri().toString(), request.getStringHeaders(), length, outputListener);
+                } else if (entityProcessing == RequestEntityProcessing.CHUNKED) {
+                    httpRequest = HttpRequest.createChunked(request.getMethod(), request.getUri().toString(), request.getStringHeaders(), chunkSize, outputListener);
+                } else {
+                    throw new IllegalStateException();
+                }
+            } else {
+                httpRequest = HttpRequest.createBuffered(request.getMethod(), request.getUri().toString(), request.getStringHeaders(), outputListener);
+            }
+
+            httpConnection.write(httpRequest, new CompletionHandler<HttpRequest>() {
+                @Override
+                public void failed(Throwable throwable) {
+                    super.failed(throwable);
+                }
+            });
+
+            try {
+                writeLatch.await();
+                request.writeEntity();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            } catch (Exception e) {
+                //
+            }
+
+
+        } else {
+            httpRequest = HttpRequest.createBodyless(request.getMethod(), request.getUri().toString(), request.getStringHeaders());
+            httpConnection.write(httpRequest, new CompletionHandler<HttpRequest>() {
+                @Override
+                public void failed(Throwable throwable) {
+                    super.failed(throwable);
+                }
+            });
+        }
+
         return null;
+    }
+
+    private Filter<HttpRequest, HttpResponse, ?, ?> createHttpConnection(final ClientRequest request, final AsyncConnectorCallback callback, final SettableFuture<ClientResponse> responseFuture) {
+
+        Map<String, Object> properties = config.getProperties();
+        ThreadPoolConfig threadPoolConfig = ClientProperties.getValue(properties, JdkConnectorProvider.WORKER_THREAD_POOL_CONFIG, ThreadPoolConfig.defaultConfig(), ThreadPoolConfig.class);
+        threadPoolConfig.setCorePoolSize(ClientProperties.getValue(properties, ClientProperties.ASYNC_THREADPOOL_SIZE, threadPoolConfig.getCorePoolSize(), Integer.class));
+        Integer containerIdleTimeout = ClientProperties.getValue(properties, JdkConnectorProvider.CONTAINER_IDLE_TIMEOUT, Integer.class);
+
+
+        URI uri = request.getUri();
+
+        List<Proxy> proxies = processProxy(properties, uri);
+        boolean secure = "https".equalsIgnoreCase(uri.getScheme());
+
+        Filter<ByteBuffer, ByteBuffer, ?, ?> socket;
+        if (secure) {
+            TransportFilter transportFilter = new TransportFilter(SSL_INPUT_BUFFER_SIZE, threadPoolConfig, containerIdleTimeout);
+            JerseyClient client = request.getClient();
+            SSLContext sslContext = client.getSslContext();;
+            if (sslContext == null) {
+                //TODO
+            }
+            HostnameVerifier hostnameVerifier = client.getHostnameVerifier();
+            socket = new SslFilter(transportFilter, sslContext, uri.getHost(), hostnameVerifier);
+        } else {
+            socket = new TransportFilter(INPUT_BUFFER_SIZE, threadPoolConfig, containerIdleTimeout);
+        }
+
+        Integer maxHeaderSize = ClientProperties.getValue(properties, JdkConnectorProvider.CONTAINER_IDLE_TIMEOUT, DEFAULT_MAX_HEADER_SIZE, Integer.class);
+        final HttpFilter httpFilter = new HttpFilter(socket, maxHeaderSize + INPUT_BUFFER_SIZE);
+
+        final AtomicBoolean waitingForReply = new AtomicBoolean(true);
+        final Filter<?, ?, HttpRequest, HttpResponse> connection = new Filter<Void, Void, HttpRequest, HttpResponse>(httpFilter) {
+
+            @Override
+            boolean processRead(HttpResponse data) {
+                waitingForReply.set(false);
+                ClientResponse clientResponse = translate(request, data);
+                callback.response(clientResponse);
+                responseFuture.set(clientResponse);
+                return false;
+            }
+
+            @Override
+            void processConnectionClosed() {
+                if (waitingForReply.get()) {
+                    IOException closeException = new IOException("Connection closed by the server");
+                    callback.failure(closeException);
+                    responseFuture.setException(closeException);
+                }
+
+                waitingForReply.set(false);
+            }
+
+            @Override
+            void processError(Throwable t) {
+                waitingForReply.set(false);
+                callback.failure(t);
+                responseFuture.setException(t);
+            }
+        };
+
+        connection.connect(new InetSocketAddress(request.getUri().getHost(), 8080), null);
+        return httpFilter;
+    }
+
+    private ClientResponse translate(final ClientRequest requestContext, final HttpResponse httpResponse) {
+
+        final ClientResponse responseContext = new ClientResponse(new Response.StatusType() {
+            @Override
+            public int getStatusCode() {
+                return httpResponse.getStatusCode();
+            }
+
+            @Override
+            public Response.Status.Family getFamily() {
+                return Response.Status.Family.familyOf(httpResponse.getStatusCode());
+            }
+
+            @Override
+            public String getReasonPhrase() {
+                return httpResponse.getReasonPhrase();
+            }
+        }, requestContext);
+
+        Map<String, List<String>> headers = httpResponse.getHeaders();
+        for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
+            for (String value : entry.getValue()) {
+                responseContext.getHeaders().add(entry.getKey(), value);
+            }
+        }
+
+        responseContext.setEntityStream(httpResponse.getBodyStream());
+
+        return responseContext;
     }
 
     @Override
     public String getName() {
-        return null;
+        return "JDK connector";
     }
 
     @Override

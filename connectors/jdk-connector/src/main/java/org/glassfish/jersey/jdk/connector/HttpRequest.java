@@ -19,8 +19,9 @@ public class HttpRequest {
     private final BodyMode bodyMode;
     private final int chunkSize;
     private final ByteBuffer bufferedBody;
+    private final int bodySize;
 
-    private HttpRequest(String method, String uri, Map<String, List<String>> headers, BodyMode bodyMode, OutputStreamListener outputStreamListener, int chunkSize, ByteBuffer bufferedBody) {
+    private HttpRequest(String method, String uri, Map<String, List<String>> headers, BodyMode bodyMode, OutputStreamListener outputStreamListener, int bodySize, int chunkSize, ByteBuffer bufferedBody) {
         this.method = method;
         this.uri = uri;
         this.headers = headers;
@@ -28,25 +29,26 @@ public class HttpRequest {
         this.outputStreamListener = outputStreamListener;
         this.chunkSize = chunkSize;
         this.bufferedBody = bufferedBody;
+        this.bodySize = bodySize;
     }
 
     public static HttpRequest createBodyless(String method, String uri, Map<String, List<String>> headers) {
-        return new HttpRequest(method, uri, headers, BodyMode.NONE, null, 0, null);
+        return new HttpRequest(method, uri, headers, BodyMode.NONE, null, 0, 0, null);
     }
 
-    public static HttpRequest createStreamed(String method, String uri, Map<String, List<String>> headers, OutputStreamListener outputStreamListener) {
-        return new HttpRequest(method, uri, headers, BodyMode.STREAMING, outputStreamListener, 0, null);
+    public static HttpRequest createStreamed(String method, String uri, Map<String, List<String>> headers, int bodySize, OutputStreamListener outputStreamListener) {
+        return new HttpRequest(method, uri, headers, BodyMode.STREAMING, outputStreamListener, bodySize, 0, null);
     }
 
-    public static HttpRequest createChunked(String method, String uri, Map<String, List<String>> headers, OutputStreamListener outputStreamListener, int chunkSize) {
-        return new HttpRequest(method, uri, headers, BodyMode.CHUNKED, outputStreamListener, chunkSize, null);
+    public static HttpRequest createChunked(String method, String uri, Map<String, List<String>> headers, int chunkSize, OutputStreamListener outputStreamListener) {
+        return new HttpRequest(method, uri, headers, BodyMode.CHUNKED, outputStreamListener, 0, chunkSize, null);
     }
 
     public static HttpRequest createBuffered(String method, String uri, Map<String, List<String>> headers, OutputStreamListener outputStreamListener) {
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
         outputStreamListener.onReady(byteArrayOutputStream);
         ByteBuffer bufferedBody = ByteBuffer.wrap(byteArrayOutputStream.toByteArray());
-        return new HttpRequest(method, uri, headers, BodyMode.BUFFERED, null, 0, bufferedBody);
+        return new HttpRequest(method, uri, headers, BodyMode.BUFFERED, null, bufferedBody.remaining(), 0, bufferedBody);
     }
 
     String getMethod() {
@@ -85,6 +87,10 @@ public class HttpRequest {
 
     void setBodyOutputStream(OutputStream bodyOutputStream) {
         outputStreamListener.onReady(bodyOutputStream);
+    }
+
+    int getBodySize() {
+        return bodySize;
     }
 
     static interface OutputStreamListener {

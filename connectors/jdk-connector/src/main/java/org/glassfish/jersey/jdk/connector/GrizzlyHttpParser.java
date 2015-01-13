@@ -94,7 +94,7 @@ class GrizzlyHttpParser {
         headerParsingState.offset = headerParsingState.offset - input.position() >= 0 ? headerParsingState.offset - input.position() : 0;
         headerParsingState.packetLimit = headerParsingState.packetLimit - input.position() >= 0 ? headerParsingState.packetLimit - input.position() : 0;
         headerParsingState.checkpoint = headerParsingState.checkpoint - input.position() >= 0 ? headerParsingState.checkpoint - input.position() : -1;
-        headerParsingState.checkpoint2 = headerParsingState.checkpoint2 - input.position() >= 0 ? headerParsingState.checkpoint2 - input.position() : 0;
+        headerParsingState.checkpoint2 = headerParsingState.checkpoint2 - input.position() >= 0 ? headerParsingState.checkpoint2 - input.position() : -1;
 
         if (input.hasRemaining()) {
             if (input != buffer) {
@@ -422,7 +422,7 @@ class GrizzlyHttpParser {
         }
 
         if (contentLengths == null && transferEncodings == null) {
-            // TODO what not?
+            // TODO what now? Expect no content or fail loudly?
         }
 
         if (contentLengths != null) {

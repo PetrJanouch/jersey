@@ -25,6 +25,8 @@ public class HttpRequestEncoder {
             }
             appendHeader(request, header.getKey(), value.toString());
         }
+
+        request.append(LINE_SEPARATOR);
     }
 
     private static void appendHeader(StringBuilder request, String key, String value) {
@@ -60,6 +62,11 @@ public class HttpRequestEncoder {
         chunkBuffer.put(startBytes);
         chunkBuffer.put(data);
         chunkBuffer.put(LINE_SEPARATOR.getBytes(Charset.forName(ENCODING)));
+
+        if (data.remaining() == 0) {
+            chunkBuffer.put(LINE_SEPARATOR.getBytes(Charset.forName(ENCODING)));
+        }
+
         return chunkBuffer;
     }
 }

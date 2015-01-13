@@ -79,7 +79,9 @@ class GrizzlyHttpParserUtils {
         }
 
         void checkOverflow(final String errorDescriptionIfOverflow) throws ParseException {
-            if (offset < packetLimit) return;
+            if (offset < packetLimit) {
+                return;
+            }
 
             throw new ParseException(errorDescriptionIfOverflow);
         }

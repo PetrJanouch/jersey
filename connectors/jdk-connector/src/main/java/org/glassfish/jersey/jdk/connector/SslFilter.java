@@ -43,18 +43,18 @@ class SslFilter extends Filter <ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer>{
      *                              if a certificate contains hostname and an IP address of the server is provided here,
      *                              the verification will fail.
      */
-    SslFilter(Filter downstreamFilter, SslEngineConfigurator sslEngineConfigurator, String serverHost) {
+    SslFilter(Filter downstreamFilter, SSLContext sslContext, String serverHost, HostnameVerifier customHostnameVerifier) {
         super(downstreamFilter);
         this.serverHost = serverHost;
-        sslEngine = sslEngineConfigurator.createSSLEngine(serverHost);
-        customHostnameVerifier = sslEngineConfigurator.getHostnameVerifier();
+        sslEngine = sslContext.createSSLEngine(serverHost, -1);
+        this.customHostnameVerifier = customHostnameVerifier;
 
         /**
          * Enable server host verification.
          * This can be moved to {@link SslEngineConfigurator} with the rest of {@link SSLEngine} configuration
          * when {@link SslEngineConfigurator} supports Java 7.
          */
-        if (sslEngineConfigurator.isHostVerificationEnabled() && sslEngineConfigurator.getHostnameVerifier() == null) {
+        if (customHostnameVerifier == null) {
             SSLParameters sslParameters = sslEngine.getSSLParameters();
             sslParameters.setEndpointIdentificationAlgorithm("HTTPS");
             sslEngine.setSSLParameters(sslParameters);

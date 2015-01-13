@@ -83,7 +83,7 @@ class Filter <UP_IN, UP_OUT, DOWN_OUT, DOWN_IN> {
     /**
      * An event listener that is called when some data is read.
      * <p/>
-     * If the {@link Filter} needs to process this event, it must implement {@link #processRead(ByteBuffer)} ()} method.
+     * If the {@link Filter} needs to process this event, it must implement {@link #onRead(Object)} ()} method.
      * If the method returns {@code true}, the processing will continue with upstream filters; if the method invocation
      * returns {@code false}, the processing won't continue.
      *
@@ -167,11 +167,11 @@ class Filter <UP_IN, UP_OUT, DOWN_OUT, DOWN_IN> {
     }
 
     /**
-     * Process {@link #onRead(ByteBuffer)}.
+     * Process {@link #onRead(Object)}.
      *
      * @param data read data.
      * @return {@code true} if the data should be sent to processing to upper filter in the chain, {@code false} otherwise.
-     * @see #onRead(ByteBuffer)
+     * @see #onRead(Object).
      */
     boolean processRead(DOWN_IN data) {
         return true;

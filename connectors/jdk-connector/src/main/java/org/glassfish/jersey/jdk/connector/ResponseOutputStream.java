@@ -53,5 +53,10 @@ abstract class ResponseOutputStream extends OutputStream {
     }
 
     @Override
-    abstract public void close();
+    public void close() throws IOException {
+        super.close();
+        onClosed();
+    }
+
+    abstract void onClosed();
 }

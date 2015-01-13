@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Created by petr on 12/12/14.
  */
-class ChunkedResponseOutputStream extends OutputStream {
+abstract class ChunkedResponseOutputStream extends OutputStream {
 
     private final static ByteBuffer EMPTY_BUFFER = ByteBuffer.allocate(0);
 
@@ -35,6 +35,7 @@ class ChunkedResponseOutputStream extends OutputStream {
         flush();
         ByteBuffer byteBuffer = HttpRequestEncoder.encodeChunk(EMPTY_BUFFER);
         writeChunk(byteBuffer);
+        onClosed();
     }
 
     @Override
@@ -43,6 +44,8 @@ class ChunkedResponseOutputStream extends OutputStream {
         chunkBuffer.reset();
         writeChunk(chunk);
     }
+
+    abstract void onClosed();
 
     private void writeChunk(ByteBuffer chunk) throws IOException {
         final CountDownLatch writeLatch = new CountDownLatch(1);
