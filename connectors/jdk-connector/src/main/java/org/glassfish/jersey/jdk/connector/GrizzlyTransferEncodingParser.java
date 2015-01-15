@@ -19,8 +19,8 @@ abstract class GrizzlyTransferEncodingParser {
         return new FixedLengthEncodingParser(responseBody, expectedLength);
     }
 
-    static GrizzlyTransferEncodingParser createChunkParser(ByteBufferInputStream responseBody, GrizzlyHttpParser httpParser, GrizzlyHttpParserUtils.HeaderParsingState headerParsingState) {
-        return new ChunkedEncodingParser(responseBody, httpParser, headerParsingState);
+    static GrizzlyTransferEncodingParser createChunkParser(ByteBufferInputStream responseBody, GrizzlyHttpParser httpParser) {
+        return new ChunkedEncodingParser(responseBody, httpParser);
     }
 
     private static class FixedLengthEncodingParser extends GrizzlyTransferEncodingParser {
@@ -91,10 +91,10 @@ abstract class GrizzlyTransferEncodingParser {
         // TODO
         private final int maxHeadersSize = 1000;
 
-        ChunkedEncodingParser(ByteBufferInputStream responseBody, GrizzlyHttpParser httpParser, GrizzlyHttpParserUtils.HeaderParsingState headerParsingState) {
+        ChunkedEncodingParser(ByteBufferInputStream responseBody, GrizzlyHttpParser httpParser) {
             this.responseBody = responseBody;
             this.httpParser = httpParser;
-            this.headerParsingState = headerParsingState;
+            this.headerParsingState = httpParser.getHeaderParsingState();
         }
 
         @Override

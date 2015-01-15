@@ -10,11 +10,11 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Created by petr on 12/12/14.
  */
-abstract class ResponseOutputStream extends OutputStream {
+abstract class BodyOutputStream extends OutputStream {
 
     private final Filter<ByteBuffer, ?, ?, ?> downstreamFilter;
 
-    ResponseOutputStream(Filter<ByteBuffer, ?, ?, ?> downstreamFilter) {
+    BodyOutputStream(Filter<ByteBuffer, ?, ?, ?> downstreamFilter) {
         this.downstreamFilter = downstreamFilter;
     }
 

@@ -12,6 +12,7 @@ public class HttpRequestEncoder {
 
     private static final String ENCODING = "US-ASCII";
     private static final String LINE_SEPARATOR = "\r\n";
+    private static final byte[] LAST_CHUNK = "0\r\n\r\n".getBytes(Charset.forName(ENCODING));
     private static final String HTTP_VERSION = "HTTP/1.1";
 
     private static void appendUpgradeHeaders(StringBuilder request, Map<String, List<String>> headers) {
@@ -49,24 +50,22 @@ public class HttpRequestEncoder {
         StringBuilder request = new StringBuilder();
         appendFirstLine(request, httpRequest);
         appendUpgradeHeaders(request, httpRequest.getHeaders());
-        request.append(LINE_SEPARATOR);
         String requestStr = request.toString();
         byte[] bytes = requestStr.getBytes(Charset.forName(ENCODING));
         return ByteBuffer.wrap(bytes);
     }
 
     static ByteBuffer encodeChunk(ByteBuffer data) {
+        if (data.remaining() == 0) {
+            return ByteBuffer.wrap(LAST_CHUNK);
+        }
         String chunkStart = Integer.toHexString(data.limit()) + LINE_SEPARATOR;
         byte[] startBytes = chunkStart.getBytes(Charset.forName(ENCODING));
         ByteBuffer chunkBuffer = ByteBuffer.allocate(startBytes.length + data.limit() + 2);
         chunkBuffer.put(startBytes);
         chunkBuffer.put(data);
         chunkBuffer.put(LINE_SEPARATOR.getBytes(Charset.forName(ENCODING)));
-
-        if (data.remaining() == 0) {
-            chunkBuffer.put(LINE_SEPARATOR.getBytes(Charset.forName(ENCODING)));
-        }
-
+        chunkBuffer.flip();
         return chunkBuffer;
     }
 }

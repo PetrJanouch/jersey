@@ -23,7 +23,7 @@ public class HttpParserTest {
 
     @Before
     public void prepare() {
-        httpParser = new GrizzlyHttpParser(Integer.MAX_VALUE);
+        httpParser = new GrizzlyHttpParser(Integer.MAX_VALUE, Integer.MAX_VALUE);
     }
 
     @Test
@@ -151,7 +151,7 @@ public class HttpParserTest {
         request.append("HTTP/1.1 123 A meaningful code\r\n")
                 .append("name1: value1\r\n")
                 .append("name2: value2\r\n")
-                .append("transfer-coding: chunked\r\n\r\n");
+                .append("Transfer-encoding: chunked\r\n\r\n");
 
 
         String chunkedBody = encodeChunk(responseBody, chunkSize, new HashMap<String, String>());
@@ -299,7 +299,7 @@ public class HttpParserTest {
 
         StringBuilder response = new StringBuilder();
         response.append("HTTP/1.1 123 A meaningful code\r\n")
-                .append("transfer-coding: chunked\r\n\r\n");
+                .append("Transfer-Encoding: chunked\r\n\r\n");
 
         String body = "ABCDE";
         String bodyLen = Integer.toHexString(body.length());
@@ -319,7 +319,7 @@ public class HttpParserTest {
 
         StringBuilder response = new StringBuilder();
         response.append("HTTP/1.1 123 A meaningful code\r\n")
-                .append("transfer-coding: chunked\r\n\r\n");
+                .append("Transfer-Encoding: chunked\r\n\r\n");
 
         String body = "ABCDE";
         String bodyLen = Integer.toHexString(body.length());
@@ -377,7 +377,7 @@ public class HttpParserTest {
         request.append("HTTP/1.1 123 A meaningful code\r\n")
                 .append("name1: value1\r\n")
                 .append("name2: value2\r\n")
-                .append("transfer-coding: chunked\r\n\r\n");
+                .append("Transfer-Encoding: chunked\r\n\r\n");
 
         StringBuilder bodyBuilder = new StringBuilder();
 
@@ -407,7 +407,7 @@ public class HttpParserTest {
     }
 
     private void testOverflow(String response, int maxHeaderSize) throws ParseException {
-        httpParser = new GrizzlyHttpParser(maxHeaderSize);
+        httpParser = new GrizzlyHttpParser(maxHeaderSize, Integer.MAX_VALUE);
         httpParser.reset(false);
         feedParser(response, Integer.MAX_VALUE);
     }

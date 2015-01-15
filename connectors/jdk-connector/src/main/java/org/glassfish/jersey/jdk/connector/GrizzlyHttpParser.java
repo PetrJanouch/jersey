@@ -13,16 +13,16 @@ import static org.glassfish.jersey.jdk.connector.GrizzlyHttpParserUtils.skipSpac
  */
 class GrizzlyHttpParser {
 
-    private static String TRANSFER_CODING_HEADER = "transfer-coding";
+    private static String TRANSFER_CODING_HEADER = "Transfer-Encoding";
     private static String TRANSFER_CODING_CHUNKED = "chunked";
     private static final String ENCODING = "ISO-8859-1";
 
     private static final int BUFFER_STEP_SIZE = 256;
     // this is package private because of the test
-    static final int BUFFER_MAX_SIZE = 40000;
     static final int INIT_BUFFER_SIZE = 1024;
 
     private final GrizzlyHttpParserUtils.HeaderParsingState headerParsingState;
+    private final int bufferMaxSize;
 
     private volatile ByteBuffer buffer = ByteBuffer.allocate(INIT_BUFFER_SIZE);
     private volatile boolean headerParsed;
@@ -34,8 +34,9 @@ class GrizzlyHttpParser {
     private volatile GrizzlyTransferEncodingParser transferEncodingParser;
     private volatile boolean complete;
 
-    GrizzlyHttpParser(int maxHeaderSize) {
+    GrizzlyHttpParser(int maxHeaderSize, int bufferMaxSize) {
         headerParsingState = new GrizzlyHttpParserUtils.HeaderParsingState(maxHeaderSize);
+        this.bufferMaxSize = bufferMaxSize;
     }
 
     void reset(boolean expectContent) {
@@ -61,7 +62,7 @@ class GrizzlyHttpParser {
 
     void parse(ByteBuffer input) throws ParseException {
         if (buffer.remaining() > 0) {
-            input = Utils.appendBuffers(buffer, input, BUFFER_MAX_SIZE, BUFFER_STEP_SIZE);
+            input = Utils.appendBuffers(buffer, input, bufferMaxSize, BUFFER_STEP_SIZE);
         }
 
         if (!headerParsed && !parseHeader(input)) {
@@ -93,14 +94,14 @@ class GrizzlyHttpParser {
         headerParsingState.start = headerParsingState.start - input.position() >= 0 ? headerParsingState.start - input.position() : 0;
         headerParsingState.offset = headerParsingState.offset - input.position() >= 0 ? headerParsingState.offset - input.position() : 0;
         headerParsingState.packetLimit = headerParsingState.packetLimit - input.position() >= 0 ? headerParsingState.packetLimit - input.position() : 0;
-        headerParsingState.checkpoint = headerParsingState.checkpoint - input.position() >= 0 ? headerParsingState.checkpoint - input.position() : -1;
-        headerParsingState.checkpoint2 = headerParsingState.checkpoint2 - input.position() >= 0 ? headerParsingState.checkpoint2 - input.position() : -1;
+        headerParsingState.checkpoint = headerParsingState.checkpoint - input.position() >= 0 ? headerParsingState.checkpoint - input.position() : 0;
+        headerParsingState.checkpoint2 = headerParsingState.checkpoint2 - input.position() >= 0 ? headerParsingState.checkpoint2 - input.position() : 0;
 
         if (input.hasRemaining()) {
             if (input != buffer) {
                 buffer.clear();
                 buffer.flip();
-                buffer = Utils.appendBuffers(buffer, input, BUFFER_MAX_SIZE, BUFFER_STEP_SIZE);
+                buffer = Utils.appendBuffers(buffer, input, bufferMaxSize, BUFFER_STEP_SIZE);
             } else {
                 buffer.compact();
                 buffer.flip();
@@ -438,7 +439,7 @@ class GrizzlyHttpParser {
         if (transferEncodings != null) {
             String transferEncoding = transferEncodings.get(0);
             if (TRANSFER_CODING_CHUNKED.equalsIgnoreCase(transferEncoding)) {
-                transferEncodingParser = GrizzlyTransferEncodingParser.createChunkParser(httpResponse.getBodyStream(), this, headerParsingState);
+                transferEncodingParser = GrizzlyTransferEncodingParser.createChunkParser(httpResponse.getBodyStream(), this);
             }
         }
     }
@@ -519,6 +520,9 @@ class GrizzlyHttpParser {
         return -1;
     }
 
+    GrizzlyHttpParserUtils.HeaderParsingState getHeaderParsingState() {
+        return headerParsingState;
+    }
 
     private String parseString(ByteBuffer input, int startIdx, int endIdx) throws ParseException {
         byte[] bytes = new byte[endIdx - startIdx];

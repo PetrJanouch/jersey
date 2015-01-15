@@ -1,7 +1,6 @@
 package org.glassfish.jersey.jdk.connector;
 
 import javax.ws.rs.core.HttpHeaders;
-import java.io.IOException;
 import java.nio.ByteBuffer;
 
 /**
@@ -9,7 +8,7 @@ import java.nio.ByteBuffer;
  */
 class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffer> {
 
-    private static String TRANSFER_CODING_HEADER = "transfer-coding";
+    private static String TRANSFER_CODING_HEADER = "Transfer-Encoding";
     private static String TRANSFER_CODING_CHUNKED = "chunked";
     private static String HEAD_METHOD = "HEAD";
     private static String CONNECT_METHOD = "CONNECT";
@@ -21,9 +20,9 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
      *
      * @param downstreamFilter downstream filter. Accessible directly as {@link #downstreamFilter} protected field.
      */
-    HttpFilter(Filter downstreamFilter, int maxHeaderSize) {
+    HttpFilter(Filter downstreamFilter, int maxHeaderSize, int maxBufferSize) {
         super(downstreamFilter);
-        this.httpParser = new GrizzlyHttpParser(maxHeaderSize);
+        this.httpParser = new GrizzlyHttpParser(maxHeaderSize, maxBufferSize);
     }
 
     @Override
@@ -46,13 +45,12 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
     private void writeBody(final HttpRequest httpRequest, final CompletionHandler<HttpRequest> completionHandler) {
         switch (httpRequest.getBodyMode()) {
             case NONE: {
-                expectingReply = true;
-                completionHandler.completed(httpRequest);
+                prepareForReply(httpRequest, completionHandler);
                 break;
             }
 
             case CHUNKED: {
-                ChunkedResponseOutputStream chunkOutputStream = new ChunkedResponseOutputStream(downstreamFilter, httpRequest.getChunkSize()) {
+                ChunkedBodyOutputStream chunkOutputStream = new ChunkedBodyOutputStream(downstreamFilter, httpRequest.getChunkSize()) {
                     @Override
                     void onClosed() {
                         prepareForReply(httpRequest, completionHandler);
@@ -64,7 +62,7 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
             }
 
             case STREAMING: {
-                ResponseOutputStream streamingOutputStream = new ResponseOutputStream(downstreamFilter) {
+                BodyOutputStream streamingOutputStream = new BodyOutputStream(downstreamFilter) {
                     @Override
                     void onClosed() {
                         prepareForReply(httpRequest, completionHandler);
@@ -100,8 +98,7 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
                 break;
             }
 
-            case BUFFERED:
-            case STREAMING:{
+            case BUFFERED:{
                 httpRequest.addHeader(HttpHeaders.CONTENT_LENGTH, Integer.toString(httpRequest.getBodySize()));
                 break;
             }

@@ -47,21 +47,19 @@ import org.glassfish.jersey.message.internal.OutboundMessageContext;
 
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.SSLContext;
-import javax.ws.rs.client.Client;
+import javax.ws.rs.ProcessingException;
 import javax.ws.rs.core.Configuration;
 import javax.ws.rs.core.Response;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
-import java.net.Proxy;
 import java.net.URI;
 import java.nio.ByteBuffer;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -82,7 +80,7 @@ class JdkConnector implements Connector {
      */
     private static final int INPUT_BUFFER_SIZE = 2048;
 
-    private static final int DEFAULT_MAX_HEADER_SIZE = Integer.MAX_VALUE;
+    private static final int DEFAULT_MAX_HEADER_SIZE = 100_000;
 
     private static final Logger LOGGER = Logger.getLogger(JdkConnector.class.getName());
 
@@ -115,7 +113,7 @@ class JdkConnector implements Connector {
             return (ClientResponse)future.get();
         } catch (Exception e) {
             // TODO
-            throw new RuntimeException(e);
+            throw new ProcessingException(e);
         }
     }
 
@@ -146,18 +144,26 @@ class JdkConnector implements Connector {
             RequestEntityProcessing entityProcessing = request.resolveProperty(
                     ClientProperties.REQUEST_ENTITY_PROCESSING, RequestEntityProcessing.class);
 
-
-            if (entityProcessing == null || entityProcessing != RequestEntityProcessing.BUFFERED) {
-                final int length = request.getLength();
-                if (fixLengthStreaming && length > 0) {
-                    httpRequest = HttpRequest.createStreamed(request.getMethod(), request.getUri().toString(), request.getStringHeaders(), length, outputListener);
-                } else if (entityProcessing == RequestEntityProcessing.CHUNKED) {
-                    httpRequest = HttpRequest.createChunked(request.getMethod(), request.getUri().toString(), request.getStringHeaders(), chunkSize, outputListener);
-                } else {
-                    throw new IllegalStateException();
-                }
+            final int length = request.getLength();
+            if (entityProcessing == null && fixLengthStreaming && length > 0) {
+                httpRequest = HttpRequest.createStreamed(request.getMethod(), request.getUri().toString(), translateHeaders(request), length, outputListener);
+            } else if (entityProcessing != null && entityProcessing == RequestEntityProcessing.CHUNKED) {
+                httpRequest = HttpRequest.createChunked(request.getMethod(), request.getUri().toString(), translateHeaders(request), chunkSize, outputListener);
             } else {
-                httpRequest = HttpRequest.createBuffered(request.getMethod(), request.getUri().toString(), request.getStringHeaders(), outputListener);
+                final ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+                request.setStreamProvider(new OutboundMessageContext.StreamProvider() {
+                    @Override
+                    public OutputStream getOutputStream(int contentLength) throws IOException {
+                        return byteArrayOutputStream;
+                    }
+                });
+                try {
+                    request.writeEntity();
+                } catch (IOException e) {
+                    throw new ProcessingException(e);
+                }
+                ByteBuffer bufferedBody = ByteBuffer.wrap(byteArrayOutputStream.toByteArray());
+                httpRequest = HttpRequest.createBuffered(request.getMethod(), request.getUri().toString(), translateHeaders(request), bufferedBody);
             }
 
             httpConnection.write(httpRequest, new CompletionHandler<HttpRequest>() {
@@ -167,18 +173,17 @@ class JdkConnector implements Connector {
                 }
             });
 
-            try {
-                writeLatch.await();
-                request.writeEntity();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            } catch (Exception e) {
-                //
+            if (httpRequest.getBodyMode() == HttpRequest.BodyMode.CHUNKED || httpRequest.getBodyMode() == HttpRequest.BodyMode.STREAMING) {
+                try {
+                    writeLatch.await();
+                    request.writeEntity();
+                } catch (Exception e) {
+                    throw new ProcessingException(e);
+                }
             }
 
-
         } else {
-            httpRequest = HttpRequest.createBodyless(request.getMethod(), request.getUri().toString(), request.getStringHeaders());
+            httpRequest = HttpRequest.createBodyless(request.getMethod(), request.getUri().toString(), translateHeaders(request));
             httpConnection.write(httpRequest, new CompletionHandler<HttpRequest>() {
                 @Override
                 public void failed(Throwable throwable) {
@@ -187,8 +192,23 @@ class JdkConnector implements Connector {
             });
         }
 
-        return null;
+        return responseFuture;
     }
+
+    private Map<String, List<String>> translateHeaders(ClientRequest clientRequest) {
+        Map<String, List<String>> headers = new HashMap<>();
+        for (Map.Entry<String, List<String>> header : clientRequest.getStringHeaders().entrySet()) {
+            List<String> values = new ArrayList<>(header.getValue());
+            headers.put(header.getKey(), values);
+        }
+
+        return headers;
+    }
+
+   // private void handleError(Throwable t, Future<?> responseFuture, AsyncConnectorCallback callback) {
+   //     callback.failure(t);
+   //     responseFuture
+  //  }
 
     private Filter<HttpRequest, HttpResponse, ?, ?> createHttpConnection(final ClientRequest request, final AsyncConnectorCallback callback, final SettableFuture<ClientResponse> responseFuture) {
 
@@ -200,14 +220,14 @@ class JdkConnector implements Connector {
 
         URI uri = request.getUri();
 
-        List<Proxy> proxies = processProxy(properties, uri);
+        //List<Proxy> proxies = processProxy(properties, uri);
         boolean secure = "https".equalsIgnoreCase(uri.getScheme());
 
         Filter<ByteBuffer, ByteBuffer, ?, ?> socket;
         if (secure) {
             TransportFilter transportFilter = new TransportFilter(SSL_INPUT_BUFFER_SIZE, threadPoolConfig, containerIdleTimeout);
             JerseyClient client = request.getClient();
-            SSLContext sslContext = client.getSslContext();;
+            SSLContext sslContext = client.getSslContext();
             if (sslContext == null) {
                 //TODO
             }
@@ -217,9 +237,11 @@ class JdkConnector implements Connector {
             socket = new TransportFilter(INPUT_BUFFER_SIZE, threadPoolConfig, containerIdleTimeout);
         }
 
-        Integer maxHeaderSize = ClientProperties.getValue(properties, JdkConnectorProvider.CONTAINER_IDLE_TIMEOUT, DEFAULT_MAX_HEADER_SIZE, Integer.class);
-        final HttpFilter httpFilter = new HttpFilter(socket, maxHeaderSize + INPUT_BUFFER_SIZE);
+        Integer maxHeaderSize = ClientProperties.getValue(properties, JdkConnectorProvider.MAX_HEADER_SIZE, DEFAULT_MAX_HEADER_SIZE, Integer.class);
 
+        final HttpFilter httpFilter = new HttpFilter(socket, maxHeaderSize, maxHeaderSize + INPUT_BUFFER_SIZE);
+
+        final CountDownLatch connectLatch = new CountDownLatch(1);
         final AtomicBoolean waitingForReply = new AtomicBoolean(true);
         final Filter<?, ?, HttpRequest, HttpResponse> connection = new Filter<Void, Void, HttpRequest, HttpResponse>(httpFilter) {
 
@@ -249,9 +271,19 @@ class JdkConnector implements Connector {
                 callback.failure(t);
                 responseFuture.setException(t);
             }
+
+            @Override
+            void processConnect() {
+               connectLatch.countDown();
+            }
         };
 
-        connection.connect(new InetSocketAddress(request.getUri().getHost(), 8080), null);
+        connection.connect(new InetSocketAddress(uri.getHost(), uri.getPort()), null);
+        try {
+            connectLatch.await();
+        } catch (InterruptedException e) {
+            throw new ProcessingException(e);
+        }
         return httpFilter;
     }
 

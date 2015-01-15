@@ -1,6 +1,5 @@
 package org.glassfish.jersey.jdk.connector;
 
-import java.io.ByteArrayOutputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -44,11 +43,8 @@ public class HttpRequest {
         return new HttpRequest(method, uri, headers, BodyMode.CHUNKED, outputStreamListener, 0, chunkSize, null);
     }
 
-    public static HttpRequest createBuffered(String method, String uri, Map<String, List<String>> headers, OutputStreamListener outputStreamListener) {
-        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-        outputStreamListener.onReady(byteArrayOutputStream);
-        ByteBuffer bufferedBody = ByteBuffer.wrap(byteArrayOutputStream.toByteArray());
-        return new HttpRequest(method, uri, headers, BodyMode.BUFFERED, null, bufferedBody.remaining(), 0, bufferedBody);
+    public static HttpRequest createBuffered(String method, String uri, Map<String, List<String>> headers, ByteBuffer body) {
+        return new HttpRequest(method, uri, headers, BodyMode.BUFFERED, null, body.remaining(), 0, body);
     }
 
     String getMethod() {
@@ -77,7 +73,7 @@ public class HttpRequest {
 
     void addHeader(String name, String value) {
         List<String> values = headers.get(name);
-        if (value == null) {
+        if (values == null) {
             values = new ArrayList<>(1);
             headers.put(name, values);
         }

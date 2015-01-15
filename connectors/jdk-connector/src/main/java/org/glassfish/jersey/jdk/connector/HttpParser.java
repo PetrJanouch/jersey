@@ -12,7 +12,7 @@ import static org.glassfish.jersey.jdk.connector.HttpParserUtils.getLine;
  */
 class HttpParser {
 
-    private static String TRANSFER_CODING_HEADER = "transfer-coding";
+    private static String TRANSFER_CODING_HEADER = "Transfer-Encoding";
     private static String TRANSFER_CODING_CHUNKED = "chunked";
 
     private static final int BUFFER_STEP_SIZE = 256;

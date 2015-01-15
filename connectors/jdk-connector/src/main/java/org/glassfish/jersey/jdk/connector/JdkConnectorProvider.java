@@ -47,6 +47,7 @@ import org.glassfish.jersey.client.spi.ConnectorProvider;
 import javax.ws.rs.client.Client;
 import javax.ws.rs.core.Configuration;
 import java.util.Map;
+import java.util.logging.Logger;
 
 /**
  * @author Petr Janouch (petr.janouch at oracle.com)
@@ -60,6 +61,8 @@ public class JdkConnectorProvider implements ConnectorProvider {
     public static final String CONTAINER_IDLE_TIMEOUT = "jersey.config.client.JdkConnectorProvider.containerIdleTimeout";
 
     public static final String MAX_HEADER_SIZE = "jersey.config.client.JdkConnectorProvider.maxHeaderSize";
+
+    private static final Logger LOGGER = Logger.getLogger(JdkConnector.class.getName());
 
     /**
      * Default chunk size in HTTP chunk-encoded messages.
@@ -83,6 +86,6 @@ public class JdkConnectorProvider implements ConnectorProvider {
         final boolean computedUseFixedLengthStreaming = ClientProperties.getValue(properties,
                 USE_FIXED_LENGTH_STREAMING, useFixedLengthStreaming, Boolean.class);
 
-        return new JdkConnector()
+        return new JdkConnector(config, computedUseFixedLengthStreaming, computedChunkSize);
     }
 }
