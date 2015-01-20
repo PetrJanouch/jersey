@@ -7,18 +7,18 @@ import java.nio.ByteBuffer;
 /**
  * Created by petr on 11/01/15.
  */
-abstract class TransferEncodingParser {
+abstract class PetrsTransferEncodingParser {
     abstract boolean parse(ByteBuffer input) throws ParseException;
 
-    static TransferEncodingParser createFixedLengthParser(ByteBufferInputStream responseBody, int expectedLength) {
+    static PetrsTransferEncodingParser createFixedLengthParser(ByteBufferInputStream responseBody, int expectedLength) {
         return new FixedLengthEncodingParser(responseBody, expectedLength);
     }
 
-    static TransferEncodingParser createChunkParser(ByteBufferInputStream responseBody, HttpParser httpParser) {
+    static PetrsTransferEncodingParser createChunkParser(ByteBufferInputStream responseBody, PetrsHttpParser httpParser) {
         return new ChunkedEncodingParser(responseBody, httpParser);
     }
 
-    private static class FixedLengthEncodingParser extends TransferEncodingParser {
+    private static class FixedLengthEncodingParser extends PetrsTransferEncodingParser {
 
         private final int expectedLength;
         private final ByteBufferInputStream responseBody;
@@ -54,25 +54,25 @@ abstract class TransferEncodingParser {
         }
     }
 
-    private static class ChunkedEncodingParser extends TransferEncodingParser {
+    private static class ChunkedEncodingParser extends PetrsTransferEncodingParser {
 
         private static final int MAX_CHUNK_HEADER_SIZE = 100;
 
         private final ByteBufferInputStream responseBody;
-        private final HttpParser httpParser;
+        private final PetrsHttpParser httpParser;
 
         private ParsingState parsingState = ParsingState.BODY;
         private ChunkParsingState chunkParsingState = ChunkParsingState.HEADER;
         private boolean lastChunk = false;
 
         private int chunkRemainder = -1;
-        private HttpParserUtils.MutableInt maxChunkHeaderSizeRemaining;
+        private PetrsHttpParserUtils.MutableInt maxChunkHeaderSizeRemaining;
 
 
-        ChunkedEncodingParser(ByteBufferInputStream responseBody, HttpParser httpParser) {
+        ChunkedEncodingParser(ByteBufferInputStream responseBody, PetrsHttpParser httpParser) {
             this.responseBody = responseBody;
             this.httpParser = httpParser;
-            this.maxChunkHeaderSizeRemaining = new HttpParserUtils.MutableInt(MAX_CHUNK_HEADER_SIZE);
+            this.maxChunkHeaderSizeRemaining = new PetrsHttpParserUtils.MutableInt(MAX_CHUNK_HEADER_SIZE);
         }
 
         @Override
@@ -123,7 +123,7 @@ abstract class TransferEncodingParser {
                 }
 
                 case CRLF: {
-                    HttpParserUtils.Line line = HttpParserUtils.getLine(input, new HttpParserUtils.MutableInt(2), "Unexpected chunk format.");
+                    PetrsHttpParserUtils.Line line = PetrsHttpParserUtils.getLine(input, new PetrsHttpParserUtils.MutableInt(2), "Unexpected chunk format.");
                     if (line == null) {
                         return false;
                     }
@@ -133,7 +133,7 @@ abstract class TransferEncodingParser {
                     }
 
                     chunkParsingState = ChunkParsingState.HEADER;
-                    this.maxChunkHeaderSizeRemaining = new HttpParserUtils.MutableInt(MAX_CHUNK_HEADER_SIZE);
+                    this.maxChunkHeaderSizeRemaining = new PetrsHttpParserUtils.MutableInt(MAX_CHUNK_HEADER_SIZE);
                     return true;
                 }
             }
@@ -142,17 +142,17 @@ abstract class TransferEncodingParser {
         }
 
         private boolean parseChunkHeader(ByteBuffer input) throws ParseException {
-            HttpParserUtils.Line line = HttpParserUtils.getLine(input, maxChunkHeaderSizeRemaining, "Chunk header overflow");
+            PetrsHttpParserUtils.Line line = PetrsHttpParserUtils.getLine(input, maxChunkHeaderSizeRemaining, "Chunk header overflow");
             if (line == null) {
                 return false;
             }
 
             int lengthEndIdx = line.lineBuffer.limit();
-            int extensionIdx = HttpParserUtils.findCharacter(line.lineBuffer, HttpParserUtils.SEMI_COLON);
+            int extensionIdx = PetrsHttpParserUtils.findCharacter(line.lineBuffer, PetrsHttpParserUtils.SEMI_COLON);
             if (extensionIdx != -1) {
                 lengthEndIdx = extensionIdx;
             }
-            String lengthHex = HttpParserUtils.parseString(line.lineBuffer, lengthEndIdx);
+            String lengthHex = PetrsHttpParserUtils.parseString(line.lineBuffer, lengthEndIdx);
             chunkRemainder = Integer.parseInt(lengthHex, 16);
             return true;
         }

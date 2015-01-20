@@ -224,7 +224,7 @@ class TransportFilter extends Filter <ByteBuffer, ByteBuffer, Void, ByteBuffer>{
         socketChannel.read(inputBuffer, null, new CompletionHandler<Integer, Void>() {
             @Override
             public void completed(Integer bytesRead, Void result) {
-
+                System.out.println("READ: " + bytesRead);
                 // connection closed by the server
                 if (bytesRead == -1) {
                     // close will set TransportFilter.this.upstreamFilter to null

@@ -1,5 +1,6 @@
 package org.glassfish.jersey.jdk.connector;
 
+import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.util.List;
@@ -40,7 +41,16 @@ public class HttpRequestEncoder {
     private static void appendFirstLine(StringBuilder request, HttpRequest httpRequest) {
         request.append(httpRequest.getMethod());
         request.append(" ");
-        request.append(httpRequest.getUri());
+        URI uri = httpRequest.getUri();
+        String path = uri.getPath();
+        if (path == null || path.isEmpty()) {
+            path = "/";
+        }
+
+        if (uri.getQuery() != null) {
+            path += "?" + uri.getQuery();
+        }
+        request.append(path);
         request.append(" ");
         request.append(HTTP_VERSION);
         request.append(LINE_SEPARATOR);

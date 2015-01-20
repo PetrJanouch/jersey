@@ -5,12 +5,12 @@ import java.nio.ByteBuffer;
 import java.util.List;
 
 import static org.glassfish.jersey.jdk.connector.GrizzlyHttpParserUtils.isSpaceOrTab;
-import static org.glassfish.jersey.jdk.connector.HttpParserUtils.getLine;
+import static org.glassfish.jersey.jdk.connector.PetrsHttpParserUtils.getLine;
 
 /**
  * Created by petr on 09/01/15.
  */
-class HttpParser {
+class PetrsHttpParser {
 
     private static String TRANSFER_CODING_HEADER = "Transfer-Encoding";
     private static String TRANSFER_CODING_CHUNKED = "chunked";
@@ -27,13 +27,13 @@ class HttpParser {
     private HeaderParsingState headerParsingState;
 
     private HttpResponse httpResponse;
-    private TransferEncodingParser transferEncodingParser;
+    private PetrsTransferEncodingParser transferEncodingParser;
     private boolean complete;
     private boolean headerParsed;
     private String headerName;
-    private HttpParserUtils.MutableInt maxSizeRemaining;
+    private PetrsHttpParserUtils.MutableInt maxSizeRemaining;
 
-    HttpParser(int maxHeaderSize) {
+    PetrsHttpParser(int maxHeaderSize) {
         this.maxHeaderSize = maxHeaderSize;
     }
 
@@ -43,7 +43,7 @@ class HttpParser {
         buffer.flip();
         complete = false;
         headerParsingState = HeaderParsingState.INITIAL_LINE;
-        maxSizeRemaining = new HttpParserUtils.MutableInt(maxHeaderSize);
+        maxSizeRemaining = new PetrsHttpParserUtils.MutableInt(maxHeaderSize);
     }
 
     boolean isHeaderParsed() {
@@ -136,7 +136,7 @@ class HttpParser {
     }
 
     private boolean decodeInitialLineFromBuffer(ByteBuffer input) throws ParseException {
-        HttpParserUtils.Line firstLine = getLine(input, maxSizeRemaining, "HTTP header too long");
+        PetrsHttpParserUtils.Line firstLine = getLine(input, maxSizeRemaining, "HTTP header too long");
         if (firstLine == null) {
 
             return false;
@@ -153,20 +153,20 @@ class HttpParser {
             throw new ParseException("Unexpected format of the first line of a HTTP response: " + firstLine);
         }
 
-        String version = HttpParserUtils.parseString(lineBuffer, versionEndIdx);
+        String version = PetrsHttpParserUtils.parseString(lineBuffer, versionEndIdx);
         lineBuffer.position(versionEndIdx);
 
-        HttpParserUtils.skipSpaces(lineBuffer);
+        PetrsHttpParserUtils.skipSpaces(lineBuffer);
         int statusCodeEndIdx = findSpace(lineBuffer);
 
-        int statusCode = HttpParserUtils.parseInt(lineBuffer, statusCodeEndIdx);
+        int statusCode = PetrsHttpParserUtils.parseInt(lineBuffer, statusCodeEndIdx);
         if (statusCodeEndIdx == -1) {
             throw new ParseException("Unexpected format of the first line of a HTTP response: " + firstLine);
         }
 
-        HttpParserUtils.skipSpaces(lineBuffer);
+        PetrsHttpParserUtils.skipSpaces(lineBuffer);
 
-        String reasonPhrase = HttpParserUtils.parseString(lineBuffer, lineBuffer.limit());
+        String reasonPhrase = PetrsHttpParserUtils.parseString(lineBuffer, lineBuffer.limit());
 
         httpResponse = new HttpResponse(version, statusCode, reasonPhrase);
 
@@ -175,7 +175,7 @@ class HttpParser {
 
     boolean parseHeadersFromBuffer(final ByteBuffer input) throws ParseException {
         while (true) {
-            HttpParserUtils.Line line = getLine(input, maxSizeRemaining, "HTTP header too long");
+            PetrsHttpParserUtils.Line line = getLine(input, maxSizeRemaining, "HTTP header too long");
             if (line == null) {
                 return false;
             }
@@ -195,27 +195,27 @@ class HttpParser {
     }
 
     private void parseHeaderFromBuffer(ByteBuffer headerLine) throws ParseException {
-        int nameEndIdx = HttpParserUtils.findCharacter(headerLine, HttpParserUtils.COLON);
-        headerName = HttpParserUtils.parseString(headerLine, nameEndIdx);
+        int nameEndIdx = PetrsHttpParserUtils.findCharacter(headerLine, PetrsHttpParserUtils.COLON);
+        headerName = PetrsHttpParserUtils.parseString(headerLine, nameEndIdx);
         headerLine.position(nameEndIdx + 1);
-        HttpParserUtils.skipSpaces(headerLine);
+        PetrsHttpParserUtils.skipSpaces(headerLine);
         parseValueFromBuffer(headerLine);
 
     }
 
     private void parseValueFromBuffer(ByteBuffer headerLine) throws ParseException {
         while (true) {
-            int endIdx = HttpParserUtils.findCharacter(headerLine, HttpParserUtils.COMMA);
+            int endIdx = PetrsHttpParserUtils.findCharacter(headerLine, PetrsHttpParserUtils.COMMA);
             if (endIdx != -1) {
-                String value = HttpParserUtils.parseString(headerLine, endIdx);
+                String value = PetrsHttpParserUtils.parseString(headerLine, endIdx);
                 headerLine.position(endIdx + 1);
                 httpResponse.addHeader(headerName, value);
-                HttpParserUtils.skipSpaces(headerLine);
+                PetrsHttpParserUtils.skipSpaces(headerLine);
                 if (headerLine.remaining() == 0) {
                     throw new ParseException("Empty header value");
                 }
             } else {
-                String value = HttpParserUtils.parseString(headerLine, headerLine.limit());
+                String value = PetrsHttpParserUtils.parseString(headerLine, headerLine.limit());
                 httpResponse.addHeader(headerName, value);
                 return;
             }
@@ -258,7 +258,7 @@ class HttpParser {
         if (contentLengths != null) {
             try {
                 int bodyLength = Integer.parseInt(contentLengths.get(0));
-                transferEncodingParser = TransferEncodingParser.createFixedLengthParser(httpResponse.getBodyStream(), bodyLength);
+                transferEncodingParser = PetrsTransferEncodingParser.createFixedLengthParser(httpResponse.getBodyStream(), bodyLength);
 
             } catch (NumberFormatException e) {
                 throw new ParseException("Invalid format of status code");
@@ -268,7 +268,7 @@ class HttpParser {
         if (transferEncodings != null) {
             String transferEncoding = transferEncodings.get(0);
             if (TRANSFER_CODING_CHUNKED.equalsIgnoreCase(transferEncoding)) {
-                transferEncodingParser = TransferEncodingParser.createChunkParser(httpResponse.getBodyStream(), this);
+                transferEncodingParser = PetrsTransferEncodingParser.createChunkParser(httpResponse.getBodyStream(), this);
             }
         }
     }

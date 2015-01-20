@@ -5,6 +5,7 @@ import org.glassfish.jersey.client.ClientProperties;
 import org.glassfish.jersey.client.RequestEntityProcessing;
 import org.glassfish.jersey.server.ResourceConfig;
 import org.glassfish.jersey.test.JerseyTest;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import javax.ws.rs.POST;
@@ -31,6 +32,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
  */
 
 // TODO: Borrowed from Grizzly connector, decide if to keep
+    @Ignore
 public class HugeEntityTest extends JerseyTest {
 
     private static final int BUFFER_LENGTH = 1024 * 1024; // 1M

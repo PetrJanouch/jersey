@@ -86,6 +86,6 @@ public class JdkConnectorProvider implements ConnectorProvider {
         final boolean computedUseFixedLengthStreaming = ClientProperties.getValue(properties,
                 USE_FIXED_LENGTH_STREAMING, useFixedLengthStreaming, Boolean.class);
 
-        return new JdkConnector(config, computedUseFixedLengthStreaming, computedChunkSize);
+        return new JdkConnector(client, config, computedUseFixedLengthStreaming, computedChunkSize);
     }
 }

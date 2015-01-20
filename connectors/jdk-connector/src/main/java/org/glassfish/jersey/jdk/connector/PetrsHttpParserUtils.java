@@ -6,7 +6,7 @@ import java.nio.ByteBuffer;
 /**
  * Created by petr on 11/01/15.
  */
-class HttpParserUtils {
+class PetrsHttpParserUtils {
 
     private static final String ENCODING = "ISO-8859-1";
 
@@ -89,7 +89,7 @@ class HttpParserUtils {
         }
 
         int positionBeforeSkipSpace =input.position();
-        HttpParserUtils.skipSpaces(input);
+        PetrsHttpParserUtils.skipSpaces(input);
         if (input.position() + 1 == lineEndIdx) {
             input.position(lineEndIdx + 1);
             return Line.createEmptyLine();

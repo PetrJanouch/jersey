@@ -39,12 +39,18 @@ class Filter <UP_IN, UP_OUT, DOWN_OUT, DOWN_IN> {
      * The filter is expected to clean up any allocated resources and pass the invocation to downstream filter.
      */
     void close() {
+        if (downstreamFilter != null) {
+            downstreamFilter.close();
+        }
     }
 
     /**
      * Signal to turn on SSL, it is passed on in the filter chain until a filter responsible for SSL is reached.
      */
     void startSsl() {
+        if (downstreamFilter != null) {
+            downstreamFilter.startSsl();
+        }
     }
 
     /**

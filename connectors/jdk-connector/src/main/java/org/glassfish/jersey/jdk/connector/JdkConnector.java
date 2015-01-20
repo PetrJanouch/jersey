@@ -40,6 +40,7 @@
 package org.glassfish.jersey.jdk.connector;
 
 import jersey.repackaged.com.google.common.util.concurrent.SettableFuture;
+import org.glassfish.jersey.SslConfigurator;
 import org.glassfish.jersey.client.*;
 import org.glassfish.jersey.client.spi.AsyncConnectorCallback;
 import org.glassfish.jersey.client.spi.Connector;
@@ -47,7 +48,9 @@ import org.glassfish.jersey.message.internal.OutboundMessageContext;
 
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.SSLContext;
+import javax.ws.rs.HEAD;
 import javax.ws.rs.ProcessingException;
+import javax.ws.rs.client.Client;
 import javax.ws.rs.core.Configuration;
 import javax.ws.rs.core.Response;
 import java.io.ByteArrayOutputStream;
@@ -55,11 +58,13 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -67,31 +72,34 @@ import java.util.logging.Logger;
  */
 class JdkConnector implements Connector {
 
-    /**
-     * Input buffer that is used by {@link org.glassfish.jersey.jdk.connector.TransportFilter} when SSL is turned on.
-     * The size cannot be smaller than a maximal size of a SSL packet, which is 16kB for payload + header, because
-     * {@link org.glassfish.jersey.jdk.connector.SslFilter} does not have its own buffer for buffering incoming
-     * data and therefore the entire SSL packet must fit into {@link org.glassfish.jersey.jdk.connector.SslFilter}
-     * input buffer.
-     */
-    private static final int SSL_INPUT_BUFFER_SIZE = 17_000;
-    /**
-     * Input buffer that is used by {@link org.glassfish.jersey.jdk.connector.TransportFilter} when SSL is not turned on.
-     */
-    private static final int INPUT_BUFFER_SIZE = 2048;
-
     private static final int DEFAULT_MAX_HEADER_SIZE = 100_000;
+
 
     private static final Logger LOGGER = Logger.getLogger(JdkConnector.class.getName());
 
     private final boolean fixLengthStreaming;
     private final int chunkSize;
-    private final Configuration config;
+    private final HttpConnectionPool httpConnectionPool;
+    private final boolean followRedirects = true;
 
-    JdkConnector(Configuration config, boolean fixLengthStreaming, int chunkSize) {
+    JdkConnector(Client client, Configuration config, boolean fixLengthStreaming, int chunkSize) {
         this.fixLengthStreaming = fixLengthStreaming;
         this.chunkSize = chunkSize;
-        this.config = config;
+
+        Map<String, Object> properties = config.getProperties();
+        ThreadPoolConfig threadPoolConfig = ClientProperties.getValue(properties, JdkConnectorProvider.WORKER_THREAD_POOL_CONFIG, ThreadPoolConfig.defaultConfig(), ThreadPoolConfig.class);
+        threadPoolConfig.setCorePoolSize(ClientProperties.getValue(properties, ClientProperties.ASYNC_THREADPOOL_SIZE, threadPoolConfig.getCorePoolSize(), Integer.class));
+        Integer containerIdleTimeout = ClientProperties.getValue(properties, JdkConnectorProvider.CONTAINER_IDLE_TIMEOUT, Integer.class);
+
+        Integer maxHeaderSize = ClientProperties.getValue(properties, JdkConnectorProvider.MAX_HEADER_SIZE, DEFAULT_MAX_HEADER_SIZE, Integer.class);
+
+        SSLContext sslContext = client.getSslContext();
+        if (sslContext == null) {
+            sslContext = SslConfigurator.getDefaultContext();
+        }
+
+        HostnameVerifier hostnameVerifier = client.getHostnameVerifier();
+        httpConnectionPool = new HttpConnectionPool(100, 20, threadPoolConfig, containerIdleTimeout, maxHeaderSize, sslContext, hostnameVerifier, 30);
     }
 
     @Override
@@ -118,14 +126,12 @@ class JdkConnector implements Connector {
     }
 
     @Override
-    public Future<?> apply(final ClientRequest request, AsyncConnectorCallback callback) {
-        SettableFuture<ClientResponse> responseFuture = SettableFuture.create();
-        Filter<HttpRequest, HttpResponse, ?, ?> httpConnection = createHttpConnection(request, callback, responseFuture);
+    public Future<?> apply(final ClientRequest request, final AsyncConnectorCallback callback) {
+        final SettableFuture<ClientResponse> responseFuture = SettableFuture.create();
 
         final Object entity = request.getEntity();
         HttpRequest httpRequest;
         if (entity != null) {
-            final CountDownLatch writeLatch = new CountDownLatch(1);
             HttpRequest.OutputStreamListener outputListener = new HttpRequest.OutputStreamListener() {
 
                 @Override
@@ -137,7 +143,11 @@ class JdkConnector implements Connector {
                             return outputStream;
                         }
                     });
-                    writeLatch.countDown();
+                    try {
+                        request.writeEntity();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
                 }
             };
 
@@ -146,51 +156,37 @@ class JdkConnector implements Connector {
 
             final int length = request.getLength();
             if (entityProcessing == null && fixLengthStreaming && length > 0) {
-                httpRequest = HttpRequest.createStreamed(request.getMethod(), request.getUri().toString(), translateHeaders(request), length, outputListener);
+                httpRequest = HttpRequest.createStreamed(request.getMethod(), request.getUri(), translateHeaders(request), length, outputListener);
             } else if (entityProcessing != null && entityProcessing == RequestEntityProcessing.CHUNKED) {
-                httpRequest = HttpRequest.createChunked(request.getMethod(), request.getUri().toString(), translateHeaders(request), chunkSize, outputListener);
+                httpRequest = HttpRequest.createChunked(request.getMethod(), request.getUri(), translateHeaders(request), chunkSize, outputListener);
             } else {
-                final ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-                request.setStreamProvider(new OutboundMessageContext.StreamProvider() {
-                    @Override
-                    public OutputStream getOutputStream(int contentLength) throws IOException {
-                        return byteArrayOutputStream;
-                    }
-                });
-                try {
-                    request.writeEntity();
-                } catch (IOException e) {
-                    throw new ProcessingException(e);
-                }
-                ByteBuffer bufferedBody = ByteBuffer.wrap(byteArrayOutputStream.toByteArray());
-                httpRequest = HttpRequest.createBuffered(request.getMethod(), request.getUri().toString(), translateHeaders(request), bufferedBody);
-            }
-
-            httpConnection.write(httpRequest, new CompletionHandler<HttpRequest>() {
-                @Override
-                public void failed(Throwable throwable) {
-                    super.failed(throwable);
-                }
-            });
-
-            if (httpRequest.getBodyMode() == HttpRequest.BodyMode.CHUNKED || httpRequest.getBodyMode() == HttpRequest.BodyMode.STREAMING) {
-                try {
-                    writeLatch.await();
-                    request.writeEntity();
-                } catch (Exception e) {
-                    throw new ProcessingException(e);
-                }
+                httpRequest = HttpRequest.createBuffered(request.getMethod(), request.getUri(), translateHeaders(request), outputListener);
             }
 
         } else {
-            httpRequest = HttpRequest.createBodyless(request.getMethod(), request.getUri().toString(), translateHeaders(request));
-            httpConnection.write(httpRequest, new CompletionHandler<HttpRequest>() {
-                @Override
-                public void failed(Throwable throwable) {
-                    super.failed(throwable);
-                }
-            });
+            httpRequest = HttpRequest.createBodyless(request.getMethod(), request.getUri(), translateHeaders(request));
         }
+
+        final RedirectHandler redirectHandler = new RedirectHandler(followRedirects, request.getUri(), httpConnectionPool, request.getMethod(), translateHeaders(request));
+        httpConnectionPool.execute(httpRequest, new CompletionHandler<HttpResponse>() {
+
+            @Override
+            public void failed(Throwable throwable) {
+                callback.failure(throwable);
+                responseFuture.setException(throwable);
+            }
+
+            @Override
+            public void completed(HttpResponse result) {
+                // recursively follow redirects - stop the recursion when the final response arrives
+                if (!redirectHandler.handleRedirects(result, this)) {
+                    return;
+                }
+                ClientResponse response = translate(request, result, redirectHandler.getLastRequestUri());
+                callback.response(response);
+                responseFuture.set(response);
+            }
+        });
 
         return responseFuture;
     }
@@ -205,89 +201,7 @@ class JdkConnector implements Connector {
         return headers;
     }
 
-   // private void handleError(Throwable t, Future<?> responseFuture, AsyncConnectorCallback callback) {
-   //     callback.failure(t);
-   //     responseFuture
-  //  }
-
-    private Filter<HttpRequest, HttpResponse, ?, ?> createHttpConnection(final ClientRequest request, final AsyncConnectorCallback callback, final SettableFuture<ClientResponse> responseFuture) {
-
-        Map<String, Object> properties = config.getProperties();
-        ThreadPoolConfig threadPoolConfig = ClientProperties.getValue(properties, JdkConnectorProvider.WORKER_THREAD_POOL_CONFIG, ThreadPoolConfig.defaultConfig(), ThreadPoolConfig.class);
-        threadPoolConfig.setCorePoolSize(ClientProperties.getValue(properties, ClientProperties.ASYNC_THREADPOOL_SIZE, threadPoolConfig.getCorePoolSize(), Integer.class));
-        Integer containerIdleTimeout = ClientProperties.getValue(properties, JdkConnectorProvider.CONTAINER_IDLE_TIMEOUT, Integer.class);
-
-
-        URI uri = request.getUri();
-
-        //List<Proxy> proxies = processProxy(properties, uri);
-        boolean secure = "https".equalsIgnoreCase(uri.getScheme());
-
-        Filter<ByteBuffer, ByteBuffer, ?, ?> socket;
-        if (secure) {
-            TransportFilter transportFilter = new TransportFilter(SSL_INPUT_BUFFER_SIZE, threadPoolConfig, containerIdleTimeout);
-            JerseyClient client = request.getClient();
-            SSLContext sslContext = client.getSslContext();
-            if (sslContext == null) {
-                //TODO
-            }
-            HostnameVerifier hostnameVerifier = client.getHostnameVerifier();
-            socket = new SslFilter(transportFilter, sslContext, uri.getHost(), hostnameVerifier);
-        } else {
-            socket = new TransportFilter(INPUT_BUFFER_SIZE, threadPoolConfig, containerIdleTimeout);
-        }
-
-        Integer maxHeaderSize = ClientProperties.getValue(properties, JdkConnectorProvider.MAX_HEADER_SIZE, DEFAULT_MAX_HEADER_SIZE, Integer.class);
-
-        final HttpFilter httpFilter = new HttpFilter(socket, maxHeaderSize, maxHeaderSize + INPUT_BUFFER_SIZE);
-
-        final CountDownLatch connectLatch = new CountDownLatch(1);
-        final AtomicBoolean waitingForReply = new AtomicBoolean(true);
-        final Filter<?, ?, HttpRequest, HttpResponse> connection = new Filter<Void, Void, HttpRequest, HttpResponse>(httpFilter) {
-
-            @Override
-            boolean processRead(HttpResponse data) {
-                waitingForReply.set(false);
-                ClientResponse clientResponse = translate(request, data);
-                callback.response(clientResponse);
-                responseFuture.set(clientResponse);
-                return false;
-            }
-
-            @Override
-            void processConnectionClosed() {
-                if (waitingForReply.get()) {
-                    IOException closeException = new IOException("Connection closed by the server");
-                    callback.failure(closeException);
-                    responseFuture.setException(closeException);
-                }
-
-                waitingForReply.set(false);
-            }
-
-            @Override
-            void processError(Throwable t) {
-                waitingForReply.set(false);
-                callback.failure(t);
-                responseFuture.setException(t);
-            }
-
-            @Override
-            void processConnect() {
-               connectLatch.countDown();
-            }
-        };
-
-        connection.connect(new InetSocketAddress(uri.getHost(), uri.getPort()), null);
-        try {
-            connectLatch.await();
-        } catch (InterruptedException e) {
-            throw new ProcessingException(e);
-        }
-        return httpFilter;
-    }
-
-    private ClientResponse translate(final ClientRequest requestContext, final HttpResponse httpResponse) {
+    private ClientResponse translate(final ClientRequest requestContext, final HttpResponse httpResponse, URI requestUri) {
 
         final ClientResponse responseContext = new ClientResponse(new Response.StatusType() {
             @Override
@@ -304,7 +218,7 @@ class JdkConnector implements Connector {
             public String getReasonPhrase() {
                 return httpResponse.getReasonPhrase();
             }
-        }, requestContext);
+        }, requestContext, requestUri);
 
         Map<String, List<String>> headers = httpResponse.getHeaders();
         for (Map.Entry<String, List<String>> entry : headers.entrySet()) {

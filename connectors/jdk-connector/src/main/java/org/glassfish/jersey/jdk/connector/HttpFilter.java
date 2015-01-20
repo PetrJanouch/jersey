@@ -1,6 +1,5 @@
 package org.glassfish.jersey.jdk.connector;
 
-import javax.ws.rs.core.HttpHeaders;
 import java.nio.ByteBuffer;
 
 /**
@@ -8,8 +7,7 @@ import java.nio.ByteBuffer;
  */
 class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffer> {
 
-    private static String TRANSFER_CODING_HEADER = "Transfer-Encoding";
-    private static String TRANSFER_CODING_CHUNKED = "chunked";
+
     private static String HEAD_METHOD = "HEAD";
     private static String CONNECT_METHOD = "CONNECT";
 
@@ -27,7 +25,6 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
 
     @Override
     void write(final HttpRequest httpRequest, final CompletionHandler<HttpRequest> completionHandler) {
-        addTransportHeaders(httpRequest);
         ByteBuffer header = HttpRequestEncoder.encodeHeader(httpRequest);
         downstreamFilter.write(header, new CompletionHandler<ByteBuffer>() {
             @Override
@@ -86,20 +83,6 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
                     }
                 });
 
-                break;
-            }
-        }
-    }
-
-    private void addTransportHeaders(HttpRequest httpRequest) {
-        switch (httpRequest.getBodyMode()) {
-            case CHUNKED: {
-                httpRequest.addHeader(TRANSFER_CODING_HEADER, TRANSFER_CODING_CHUNKED);
-                break;
-            }
-
-            case BUFFERED:{
-                httpRequest.addHeader(HttpHeaders.CONTENT_LENGTH, Integer.toString(httpRequest.getBodySize()));
                 break;
             }
         }

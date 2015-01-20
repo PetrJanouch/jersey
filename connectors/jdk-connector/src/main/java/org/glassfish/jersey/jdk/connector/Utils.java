@@ -1,5 +1,6 @@
 package org.glassfish.jersey.jdk.connector;
 
+import java.net.URI;
 import java.nio.ByteBuffer;
 
 /**
@@ -59,5 +60,17 @@ public class Utils {
         byte[] bytes = new byte[bytesLength];
         buffer.get(bytes);
         return ByteBuffer.wrap(bytes);
+    }
+
+    static int getPort(URI uri) {
+        if (uri.getPort() != -1) {
+            return uri.getPort();
+        }
+
+        if ("https".equals(uri.getScheme())) {
+            return 443;
+        }
+
+        return 80;
     }
 }

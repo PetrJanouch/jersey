@@ -91,11 +91,12 @@ class GrizzlyHttpParser {
 
     private void saveRemaining(ByteBuffer input) {
 
-        headerParsingState.start = headerParsingState.start - input.position() >= 0 ? headerParsingState.start - input.position() : 0;
-        headerParsingState.offset = headerParsingState.offset - input.position() >= 0 ? headerParsingState.offset - input.position() : 0;
-        headerParsingState.packetLimit = headerParsingState.packetLimit - input.position() >= 0 ? headerParsingState.packetLimit - input.position() : 0;
-        headerParsingState.checkpoint = headerParsingState.checkpoint - input.position() >= 0 ? headerParsingState.checkpoint - input.position() : 0;
-        headerParsingState.checkpoint2 = headerParsingState.checkpoint2 - input.position() >= 0 ? headerParsingState.checkpoint2 - input.position() : 0;
+        // some of the fields use 0 nad -1 as a special state -> if the field is <= 0, just let it be
+        headerParsingState.start = headerParsingState.start > 0 ? headerParsingState.start - input.position() : headerParsingState.start;
+        headerParsingState.offset = headerParsingState.offset > 0 ? headerParsingState.offset - input.position() : headerParsingState.offset;
+        headerParsingState.packetLimit = headerParsingState.packetLimit > 0 ? headerParsingState.packetLimit - input.position() : headerParsingState.packetLimit;
+        headerParsingState.checkpoint = headerParsingState.checkpoint > 0 ? headerParsingState.checkpoint - input.position() : headerParsingState.checkpoint;
+        headerParsingState.checkpoint2 = headerParsingState.checkpoint2 > 0 ? headerParsingState.checkpoint2 - input.position() : headerParsingState.checkpoint2;
 
         if (input.hasRemaining()) {
             if (input != buffer) {
@@ -415,16 +416,18 @@ class GrizzlyHttpParser {
             expectContent = false;
         }
 
-        List<String> contentLengths = httpResponse.getHeader(HttpHeaders.CONTENT_LENGTH);
         List<String> transferEncodings = httpResponse.getHeader(TRANSFER_CODING_HEADER);
 
-        if (contentLengths != null && transferEncodings != null) {
-            // TODO what now? Fail loudly or choose one?
+        if (transferEncodings != null) {
+            String transferEncoding = transferEncodings.get(0);
+            if (TRANSFER_CODING_CHUNKED.equalsIgnoreCase(transferEncoding)) {
+                transferEncodingParser = GrizzlyTransferEncodingParser.createChunkParser(httpResponse.getBodyStream(), this);
+            }
+
+            return;
         }
 
-        if (contentLengths == null && transferEncodings == null) {
-            // TODO what now? Expect no content or fail loudly?
-        }
+        List<String> contentLengths = httpResponse.getHeader(HttpHeaders.CONTENT_LENGTH);
 
         if (contentLengths != null) {
             try {
@@ -434,14 +437,11 @@ class GrizzlyHttpParser {
             } catch (NumberFormatException e) {
                 throw new ParseException("Invalid format of status code");
             }
+
+            return;
         }
 
-        if (transferEncodings != null) {
-            String transferEncoding = transferEncodings.get(0);
-            if (TRANSFER_CODING_CHUNKED.equalsIgnoreCase(transferEncoding)) {
-                transferEncodingParser = GrizzlyTransferEncodingParser.createChunkParser(httpResponse.getBodyStream(), this);
-            }
-        }
+        // TODO what now? Expect no content or fail loudly?
     }
 
     private int findSpace(final ByteBuffer input, int offset, final int packetLimit) {

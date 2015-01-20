@@ -47,6 +47,7 @@ class SslFilter extends Filter <ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer>{
         super(downstreamFilter);
         this.serverHost = serverHost;
         sslEngine = sslContext.createSSLEngine(serverHost, -1);
+        sslEngine.setUseClientMode(true);
         this.customHostnameVerifier = customHostnameVerifier;
 
         /**
@@ -162,14 +163,13 @@ class SslFilter extends Filter <ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer>{
                             onSslHandshakeCompleted();
                             return false;
                         }
+
                         if (!networkData.hasRemaining() || result.getHandshakeStatus() != SSLEngineResult.HandshakeStatus.NEED_UNWRAP) {
-                            // all data has been read or the engine needs to do something else than read
-                            break;
+                            // write or do tasks (for instance validating certificates)
+                            doHandshakeStep(downstreamFilter);
                         }
                     }
                 }
-                // write or do tasks (for instance validating certificates)
-                doHandshakeStep(downstreamFilter);
 
             } else {
                 // Encrypting received data
@@ -241,10 +241,6 @@ class SslFilter extends Filter <ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer>{
                             Runnable delegatedTask;
                             while ((delegatedTask = sslEngine.getDelegatedTask()) != null) {
                                 delegatedTask.run();
-                            }
-                            if (sslEngine.getHandshakeStatus() == SSLEngineResult.HandshakeStatus.NEED_UNWRAP) {
-                                handleSslError(new SSLException("SSL handshake error has occurred - more data needed for validating the certificate"));
-                                return;
                             }
                             break;
                         }
