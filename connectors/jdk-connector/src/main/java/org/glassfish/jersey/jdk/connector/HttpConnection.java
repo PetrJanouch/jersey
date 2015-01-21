@@ -67,10 +67,14 @@ class HttpConnection {
             @Override
             boolean processRead(HttpResponse response) {
                 scheduleTimeout();
-                listener.onCompleted(HttpConnection.this);
-                responseCompletionHandler.completed(response);
+
+                CompletionHandler<HttpResponse> completionHandler = responseCompletionHandler;
                 responseCompletionHandler = null;
+
                 processReceivedHeaders(response);
+                listener.onCompleted(HttpConnection.this);
+
+                completionHandler.completed(response);
                 return false;
             }
 
@@ -120,7 +124,7 @@ class HttpConnection {
         if (scheduledClose != null) {
             scheduledClose.cancel(true);
         }
-        httpRequest.addHeader("Connection", "keep-alive");
+        httpRequest.addHeaderIfNotPresent("Connection", "keep-alive");
 
         filterChain.write(httpRequest, new CompletionHandler<HttpRequest>() {
             @Override

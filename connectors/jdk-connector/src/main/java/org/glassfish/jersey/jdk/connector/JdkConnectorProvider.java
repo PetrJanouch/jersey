@@ -62,6 +62,8 @@ public class JdkConnectorProvider implements ConnectorProvider {
 
     public static final String MAX_HEADER_SIZE = "jersey.config.client.JdkConnectorProvider.maxHeaderSize";
 
+    public static final String MAX_REDIRECTS = "jersey.config.client.JdkConnectorProvider.maxRedirects";
+
     private static final Logger LOGGER = Logger.getLogger(JdkConnector.class.getName());
 
     /**

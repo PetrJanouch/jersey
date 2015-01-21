@@ -61,6 +61,8 @@ class GrizzlyHttpParser {
     }
 
     void parse(ByteBuffer input) throws ParseException {
+        System.out.println(parseString(input, 0, input.limit()));
+        input.position(0);
         if (buffer.remaining() > 0) {
             input = Utils.appendBuffers(buffer, input, bufferMaxSize, BUFFER_STEP_SIZE);
         }

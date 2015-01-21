@@ -41,30 +41,28 @@ package org.glassfish.jersey.jdk.connector;
 
 import jersey.repackaged.com.google.common.util.concurrent.SettableFuture;
 import org.glassfish.jersey.SslConfigurator;
-import org.glassfish.jersey.client.*;
+import org.glassfish.jersey.client.ClientProperties;
+import org.glassfish.jersey.client.ClientRequest;
+import org.glassfish.jersey.client.ClientResponse;
+import org.glassfish.jersey.client.RequestEntityProcessing;
 import org.glassfish.jersey.client.spi.AsyncConnectorCallback;
 import org.glassfish.jersey.client.spi.Connector;
 import org.glassfish.jersey.message.internal.OutboundMessageContext;
 
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.SSLContext;
-import javax.ws.rs.HEAD;
 import javax.ws.rs.ProcessingException;
 import javax.ws.rs.client.Client;
 import javax.ws.rs.core.Configuration;
 import javax.ws.rs.core.Response;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.net.InetSocketAddress;
 import java.net.URI;
-import java.net.URISyntaxException;
-import java.nio.ByteBuffer;
-import java.util.*;
-import java.util.concurrent.CountDownLatch;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Future;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -73,14 +71,15 @@ import java.util.logging.Logger;
 class JdkConnector implements Connector {
 
     private static final int DEFAULT_MAX_HEADER_SIZE = 100_000;
-
+    private static final int DEFAULT_MAX_REDIRECTS = 5;
 
     private static final Logger LOGGER = Logger.getLogger(JdkConnector.class.getName());
 
     private final boolean fixLengthStreaming;
     private final int chunkSize;
     private final HttpConnectionPool httpConnectionPool;
-    private final boolean followRedirects = true;
+    private final boolean followRedirects;
+    private final int maxRedirects;
 
     JdkConnector(Client client, Configuration config, boolean fixLengthStreaming, int chunkSize) {
         this.fixLengthStreaming = fixLengthStreaming;
@@ -92,6 +91,7 @@ class JdkConnector implements Connector {
         Integer containerIdleTimeout = ClientProperties.getValue(properties, JdkConnectorProvider.CONTAINER_IDLE_TIMEOUT, Integer.class);
 
         Integer maxHeaderSize = ClientProperties.getValue(properties, JdkConnectorProvider.MAX_HEADER_SIZE, DEFAULT_MAX_HEADER_SIZE, Integer.class);
+        followRedirects = ClientProperties.getValue(properties, ClientProperties.FOLLOW_REDIRECTS, true, Boolean.class);
 
         SSLContext sslContext = client.getSslContext();
         if (sslContext == null) {
@@ -100,6 +100,8 @@ class JdkConnector implements Connector {
 
         HostnameVerifier hostnameVerifier = client.getHostnameVerifier();
         httpConnectionPool = new HttpConnectionPool(100, 20, threadPoolConfig, containerIdleTimeout, maxHeaderSize, sslContext, hostnameVerifier, 30);
+
+        maxRedirects = ClientProperties.getValue(properties, JdkConnectorProvider.MAX_REDIRECTS, DEFAULT_MAX_REDIRECTS, Integer.class);
     }
 
     @Override
@@ -167,7 +169,7 @@ class JdkConnector implements Connector {
             httpRequest = HttpRequest.createBodyless(request.getMethod(), request.getUri(), translateHeaders(request));
         }
 
-        final RedirectHandler redirectHandler = new RedirectHandler(followRedirects, request.getUri(), httpConnectionPool, request.getMethod(), translateHeaders(request));
+        final RedirectHandler redirectHandler = new RedirectHandler(maxRedirects, followRedirects, request.getUri(), httpConnectionPool, request.getMethod(), translateHeaders(request));
         httpConnectionPool.execute(httpRequest, new CompletionHandler<HttpResponse>() {
 
             @Override

@@ -39,12 +39,12 @@ public class HttpRequest {
         this.bodySize = bodySize;
 
         int port = Utils.getPort(uri);
-        addHeader(HOST_HEADER, uri.getHost() + ":" + port);
+        addHeaderIfNotPresent(HOST_HEADER, uri.getHost() + ":" + port);
     }
 
     public static HttpRequest createBodyless(String method, URI uri, Map<String, List<String>> headers) {
         HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.NONE, null, 0, 0, null);
-        httpRequest.addHeader(HttpHeaders.CONTENT_LENGTH, Integer.toString(0));
+        httpRequest.addHeaderIfNotPresent(HttpHeaders.CONTENT_LENGTH, Integer.toString(0));
         return httpRequest;
     }
 
@@ -54,7 +54,7 @@ public class HttpRequest {
 
     public static HttpRequest createChunked(String method, URI uri, Map<String, List<String>> headers, int chunkSize, OutputStreamListener outputStreamListener) {
         HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.CHUNKED, outputStreamListener, 0, chunkSize, null);
-        httpRequest.addHeader(TRANSFER_ENCODING_HEADER, TRANSFER_ENCODING_CHUNKED);
+        httpRequest.addHeaderIfNotPresent(TRANSFER_ENCODING_HEADER, TRANSFER_ENCODING_CHUNKED);
         return httpRequest;
     }
 
@@ -63,7 +63,7 @@ public class HttpRequest {
         outputStreamListener.onReady(byteArrayOutputStream);
         ByteBuffer bufferedBody = ByteBuffer.wrap(byteArrayOutputStream.toByteArray());
         HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.BUFFERED, null, bufferedBody.remaining(), 0, bufferedBody);
-        httpRequest.addHeader(HttpHeaders.CONTENT_LENGTH, Integer.toString(httpRequest.getBodySize()));
+        httpRequest.addHeaderIfNotPresent(HttpHeaders.CONTENT_LENGTH, Integer.toString(httpRequest.getBodySize()));
 
         return httpRequest;
     }
@@ -92,14 +92,13 @@ public class HttpRequest {
         return bufferedBody;
     }
 
-    void addHeader(String name, String value) {
+    void addHeaderIfNotPresent(String name, String value) {
         List<String> values = headers.get(name);
         if (values == null) {
             values = new ArrayList<>(1);
             headers.put(name, values);
+            values.add(value);
         }
-
-        values.add(value);
     }
 
     void setBodyOutputStream(OutputStream bodyOutputStream) {

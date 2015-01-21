@@ -13,22 +13,25 @@ class RedirectHandler {
 
     private static final Logger LOGGER = Logger.getLogger(RedirectHandler.class.getName());
     private static final Set<Integer> REDIRECT_STATUS_CODES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(300, 301, 302, 303, 307, 308)));
-    private static final int DEFAULT_REDIRECT_THRESHOLD = 5;
 
+    private final int maxRedirects;
     private final boolean followRedirects;
-    private final Set<URI> redirectUriHistory = new HashSet<>(DEFAULT_REDIRECT_THRESHOLD);
+    private final Set<URI> redirectUriHistory;
     private final HttpConnectionPool httpConnectionPool;
     private final String method;
     private final Map<String, List<String>> headers;
 
     private volatile URI lastRequestUri = null;
 
-    RedirectHandler(boolean followRedirects, URI requestUri, HttpConnectionPool httpConnectionPool, String method, Map<String, List<String>> headers) {
+    RedirectHandler(int maxRedirects, boolean followRedirects, URI requestUri, HttpConnectionPool httpConnectionPool, String method, Map<String, List<String>> headers) {
         this.followRedirects = followRedirects;
+        this.maxRedirects = maxRedirects;
         this.lastRequestUri = requestUri;
         this.httpConnectionPool = httpConnectionPool;
         this.method = method;
         this.headers = headers;
+
+        this.redirectUriHistory = new HashSet<>(maxRedirects);
     }
 
     boolean handleRedirects(HttpResponse httpResponse, CompletionHandler<HttpResponse> completionHandler) {
@@ -53,7 +56,8 @@ class RedirectHandler {
 
         if (locationString == null || locationString.equals("")) {
             //TODO
-            throw new IllegalStateException("");
+            completionHandler.failed(new RedirectException("Infinite loop in chained redirects detected"));
+            return false;
         }
 
         URI location;
@@ -73,20 +77,23 @@ class RedirectHandler {
             }
         } catch (URISyntaxException e) {
             // TODO
-            throw new IllegalStateException(e);
+            completionHandler.failed(new RedirectException("Error determining redirect location", e));
+            return false;
         }
 
         // infinite loop detection
         boolean alreadyRequested = !redirectUriHistory.add(location);
         if (alreadyRequested) {
             //TODO
-            throw new IllegalStateException("");
+            completionHandler.failed(new RedirectException("Infinite loop in chained redirects detected"));
+            return false;
         }
 
         // maximal number of redirection
-        if (redirectUriHistory.size() > DEFAULT_REDIRECT_THRESHOLD) {
+        if (redirectUriHistory.size() > maxRedirects) {
             //TODO
-            throw new IllegalStateException("");
+            completionHandler.failed(new RedirectException("Max chained redirect limit (" + maxRedirects + ") exceeded"));
+            return false;
         }
 
         HttpRequest httpRequest = HttpRequest.createBodyless(method, location, headers);
