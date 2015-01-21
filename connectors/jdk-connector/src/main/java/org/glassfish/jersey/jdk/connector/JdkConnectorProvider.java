@@ -37,6 +37,7 @@
  * only if the new code is made subject to such option by the copyright
  * holder.
  */
+
 package org.glassfish.jersey.jdk.connector;
 
 import org.glassfish.jersey.client.ClientProperties;
@@ -63,6 +64,8 @@ public class JdkConnectorProvider implements ConnectorProvider {
     public static final String MAX_HEADER_SIZE = "jersey.config.client.JdkConnectorProvider.maxHeaderSize";
 
     public static final String MAX_REDIRECTS = "jersey.config.client.JdkConnectorProvider.maxRedirects";
+
+    public static final String COOKIE_POLICY = "jersey.config.client.JdkConnectorProvider.cookiePolicy";
 
     private static final Logger LOGGER = Logger.getLogger(JdkConnector.class.getName());
 

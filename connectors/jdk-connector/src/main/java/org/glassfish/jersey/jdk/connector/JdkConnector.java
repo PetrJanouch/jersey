@@ -57,6 +57,8 @@ import javax.ws.rs.core.Configuration;
 import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.CookieManager;
+import java.net.CookiePolicy;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -72,6 +74,7 @@ class JdkConnector implements Connector {
 
     private static final int DEFAULT_MAX_HEADER_SIZE = 100_000;
     private static final int DEFAULT_MAX_REDIRECTS = 5;
+    private static final CookiePolicy DEFAULT_COOKIE_POLICY = CookiePolicy.ACCEPT_ORIGINAL_SERVER;
 
     private static final Logger LOGGER = Logger.getLogger(JdkConnector.class.getName());
 
@@ -80,6 +83,7 @@ class JdkConnector implements Connector {
     private final HttpConnectionPool httpConnectionPool;
     private final boolean followRedirects;
     private final int maxRedirects;
+    private final CookieManager cookieManager = new CookieManager();
 
     JdkConnector(Client client, Configuration config, boolean fixLengthStreaming, int chunkSize) {
         this.fixLengthStreaming = fixLengthStreaming;
@@ -93,13 +97,16 @@ class JdkConnector implements Connector {
         Integer maxHeaderSize = ClientProperties.getValue(properties, JdkConnectorProvider.MAX_HEADER_SIZE, DEFAULT_MAX_HEADER_SIZE, Integer.class);
         followRedirects = ClientProperties.getValue(properties, ClientProperties.FOLLOW_REDIRECTS, true, Boolean.class);
 
+        CookiePolicy cookiePolicy = ClientProperties.getValue(properties, JdkConnectorProvider.COOKIE_POLICY, DEFAULT_COOKIE_POLICY, CookiePolicy.class);
+        cookieManager.setCookiePolicy(cookiePolicy);
+
         SSLContext sslContext = client.getSslContext();
         if (sslContext == null) {
             sslContext = SslConfigurator.getDefaultContext();
         }
 
         HostnameVerifier hostnameVerifier = client.getHostnameVerifier();
-        httpConnectionPool = new HttpConnectionPool(100, 20, threadPoolConfig, containerIdleTimeout, maxHeaderSize, sslContext, hostnameVerifier, 30);
+        httpConnectionPool = new HttpConnectionPool(100, 20, threadPoolConfig, containerIdleTimeout, maxHeaderSize, sslContext, hostnameVerifier, 30, cookieManager);
 
         maxRedirects = ClientProperties.getValue(properties, JdkConnectorProvider.MAX_REDIRECTS, DEFAULT_MAX_REDIRECTS, Integer.class);
     }
