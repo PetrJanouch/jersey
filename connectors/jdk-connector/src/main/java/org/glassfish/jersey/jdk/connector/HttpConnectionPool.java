@@ -76,8 +76,9 @@ class HttpConnectionPool {
     private final int connectionTimeout;
     private final CookieManager cookieManager;
 
-    private final Map<HttpConnection.Key, Deque<HttpConnection>> available = new ConcurrentHashMap<>();
+    private final Map<HttpConnection.EndpointKey, Deque<HttpConnection>> available = new ConcurrentHashMap<>();
     private final Set<HttpConnection> openConnections = Collections.newSetFromMap(new ConcurrentHashMap<HttpConnection, Boolean>());
+    private final Deque<CompletionHandler<HttpConnection>> pendingConnectionRequests = new LinkedList<>();
 
 
     HttpConnectionPool(int maxOpenTotal, int maxOpenPerDestination, ThreadPoolConfig threadPoolConfig, Integer containerIdleTimeout, int maxHeaderSize, SSLContext sslContext, HostnameVerifier hostnameVerifier, int connectionTimeout, CookieManager cookieManager) {
@@ -93,26 +94,55 @@ class HttpConnectionPool {
     }
 
     void execute(final HttpRequest request, final CompletionHandler<HttpResponse> completionHandler) {
-        HttpConnection.Key key = new HttpConnection.Key(request.getUri());
-
-        Queue<HttpConnection> httpConnections = available.get(key);
-        if (httpConnections == null || httpConnections.isEmpty()) {
-            if (!canCreateConnection(key)) {
-                // TODO
-
+        obtainConnection(request, new CompletionHandler<HttpConnection>() {
+            @Override
+            public void failed(Throwable throwable) {
+                completionHandler.failed(throwable);
             }
 
-            createConnection(request.getUri(), new ConnectListener() {
-                @Override
-                public void onConnect(HttpConnection connection) {
-                    connection.execute(request, completionHandler);
-                }
-            });
+            @Override
+            public void completed(HttpConnection connection) {
+                connection.execute(request, new CompletionHandler<HttpResponse>() {
+                    @Override
+                    public void failed(Throwable throwable) {
+                        completionHandler.failed(throwable);
+                    }
+
+                    @Override
+                    public void completed(HttpResponse result) {
+                        completionHandler.completed(result);
+                    }
+                });
+            }
+        });
+    }
+
+    private synchronized void obtainConnection(final HttpRequest request, CompletionHandler<HttpConnection> completionHandler) {
+        HttpConnection.EndpointKey key = new HttpConnection.EndpointKey(request.getUri());
+        Queue<HttpConnection> httpConnections = available.get(key);
+        if (httpConnections == null || httpConnections.isEmpty()) {
+            if (canCreateConnection(key)) {
+                createConnection(request.getUri(), completionHandler);
+            } else {
+                pendingConnectionRequests.add(completionHandler);
+            }
+
         } else {
             HttpConnection connection = httpConnections.poll();
-            connection.execute(request, completionHandler);
             removeFromPool(connection);
+            completionHandler.completed(connection);
         }
+    }
+
+    private synchronized void releaseConnection(HttpConnection connection) {
+        Deque<HttpConnection> httpConnections = available.get(connection.getKey());
+        if (httpConnections == null) {
+            httpConnections = new LinkedList<>();
+            available.put(connection.getKey(), httpConnections);
+        }
+
+        httpConnections.addFirst(connection);
+       // pendingConnectionRequests
     }
 
     void shutDown() {
@@ -121,32 +151,29 @@ class HttpConnectionPool {
         }
     }
 
-    private void createConnection(URI uri, final ConnectListener connectListener) {
-        final HttpConnection connection = new HttpConnection(uri, sslContext, hostnameVerifier, maxHeaderSize, threadPoolConfig, containerIdleTimeout, connectionTimeout, scheduler, cookieManager, new HttpConnection.Listener() {
-            @Override
-            public void onConnect(HttpConnection connection) {
-                connectListener.onConnect(connection);
-            }
+    private void createConnection(URI uri, final CompletionHandler<HttpConnection> completionHandler) {
+        final HttpConnection connection = new HttpConnection(uri, sslContext, hostnameVerifier, maxHeaderSize, threadPoolConfig, containerIdleTimeout, connectionTimeout, scheduler, cookieManager, new HttpConnection.CloseListener() {
 
             @Override
             public void onClose(HttpConnection connection) {
                 openConnections.remove(connection);
                 removeFromPool(connection);
             }
+        });
+
+        connection.connect(uri, new CompletionHandler<HttpConnection>() {
+            @Override
+            public void failed(Throwable throwable) {
+                completionHandler.failed(throwable);
+            }
 
             @Override
-            public void onCompleted(HttpConnection connection) {
-                Deque<HttpConnection> httpConnections = available.get(connection.getKey());
-                if (httpConnections == null) {
-                    httpConnections = new LinkedList<>();
-                    available.put(connection.getKey(), httpConnections);
-                }
-
-                httpConnections.addFirst(connection);
+            public void completed(HttpConnection result) {
+                openConnections.add(connection);
+                completionHandler.completed(result);
             }
         });
 
-        openConnections.add(connection);
     }
 
     private void removeFromPool(HttpConnection connection) {
@@ -156,7 +183,7 @@ class HttpConnectionPool {
         }
     }
 
-    private boolean canCreateConnection(HttpConnection.Key key) {
+    private boolean canCreateConnection(HttpConnection.EndpointKey key) {
         if (openConnections.size() >= maxOpenTotal) {
             return false;
         }
@@ -171,10 +198,5 @@ class HttpConnectionPool {
         }
 
         return false;
-    }
-
-    private static interface ConnectListener {
-
-        void onConnect(HttpConnection connection);
     }
 }

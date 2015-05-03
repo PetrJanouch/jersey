@@ -74,23 +74,24 @@ class HttpConnection {
     private static final int INPUT_BUFFER_SIZE = 2048;
 
     private final Filter<HttpRequest, HttpResponse, HttpRequest, HttpResponse> filterChain;
-    private final Listener listener;
-    private final Key key;
+    private final CloseListener listener;
+    private final EndpointKey key;
     private final int connectionTimeout;
     private final ScheduledExecutorService scheduler;
     private final CookieManager cookieManager;
 
+    private CompletionHandler<HttpConnection> connectCompletionHandler = null;
     private CompletionHandler<HttpResponse> responseCompletionHandler = null;
     private ScheduledFuture<?> scheduledClose;
     private URI requestUri;
 
-    HttpConnection(URI uri, SSLContext sslContext, HostnameVerifier hostnameVerifier, int maxHeaderSize, ThreadPoolConfig threadPoolConfig, Integer containerIdleTimeout, int connectionTimeout, ScheduledExecutorService scheduler, final CookieManager cookieManager, final Listener listener) {
+    HttpConnection(URI uri, SSLContext sslContext, HostnameVerifier hostnameVerifier, int maxHeaderSize, ThreadPoolConfig threadPoolConfig, Integer containerIdleTimeout, int connectionTimeout, ScheduledExecutorService scheduler, final CookieManager cookieManager, final CloseListener listener) {
         this.listener = listener;
         this.connectionTimeout = connectionTimeout;
         this.scheduler = scheduler;
         this.cookieManager = cookieManager;
         //List<Proxy> proxies = processProxy(properties, uri);
-        key = new Key(uri);
+        key = new EndpointKey(uri);
 
         boolean secure = "https".equals(uri.getScheme());
         Filter<ByteBuffer, ByteBuffer, ?, ?> socket;
@@ -100,7 +101,7 @@ class HttpConnection {
                 sslContext = SslConfigurator.getDefaultContext();
 
             }
-            socket = new SslFilter(transportFilter, sslContext, uri.getHost(), hostnameVerifier);
+            socket = new NewSslFilter(transportFilter, sslContext, uri.getHost(), hostnameVerifier);
         } else {
             socket = new TransportFilter(INPUT_BUFFER_SIZE, threadPoolConfig, containerIdleTimeout);
         }
@@ -123,7 +124,7 @@ class HttpConnection {
                 responseCompletionHandler = null;
 
                 processReceivedHeaders(response);
-                listener.onCompleted(HttpConnection.this);
+               // listener.onTaskCompleted(HttpConnection.this);
 
                 completionHandler.completed(response);
                 return false;
@@ -131,8 +132,11 @@ class HttpConnection {
 
             @Override
             void processConnectionClosed() {
-                if (responseCompletionHandler != null) {
-                    IOException closeException = new IOException("Connection closed by the server");
+                IOException closeException = new IOException("Connection closed by the server");
+
+                if (connectCompletionHandler != null) {
+                    connectCompletionHandler.failed(closeException);
+                } else if (responseCompletionHandler != null) {
                     responseCompletionHandler.failed(closeException);
                 }
 
@@ -144,7 +148,9 @@ class HttpConnection {
 
             @Override
             void processError(Throwable t) {
-                if (responseCompletionHandler != null) {
+                if (connectCompletionHandler != null) {
+                    connectCompletionHandler.failed(t);
+                } else if (responseCompletionHandler != null) {
                     responseCompletionHandler.failed(t);
                 }
 
@@ -158,7 +164,8 @@ class HttpConnection {
 
             @Override
             void processSslHandshakeCompleted() {
-                listener.onConnect(HttpConnection.this);
+                connectCompletionHandler.completed(HttpConnection.this);
+                connectCompletionHandler = null;
             }
 
             @Override
@@ -166,8 +173,6 @@ class HttpConnection {
                 downstreamFilter.write(data, completionHandler);
             }
         };
-
-        filterChain.connect(new InetSocketAddress(uri.getHost(), Utils.getPort(uri)), null);
     }
 
     void execute(HttpRequest httpRequest, final CompletionHandler<HttpResponse> responseCompletionHandler) {
@@ -189,10 +194,16 @@ class HttpConnection {
         filterChain.write(httpRequest, new CompletionHandler<HttpRequest>() {
             @Override
             public void failed(Throwable throwable) {
+
                 responseCompletionHandler.failed(throwable);
                 HttpConnection.this.close();
             }
         });
+    }
+
+    void connect(URI uri, CompletionHandler<HttpConnection> completionHandler) {
+        filterChain.connect(new InetSocketAddress(uri.getHost(), Utils.getPort(uri)), null);
+        this.connectCompletionHandler = completionHandler;
     }
 
     void close() {
@@ -204,7 +215,7 @@ class HttpConnection {
         listener.onClose(this);
     }
 
-    Key getKey() {
+    EndpointKey getKey() {
         return key;
     }
 
@@ -240,12 +251,12 @@ class HttpConnection {
         }, connectionTimeout, TimeUnit.SECONDS);
     }
 
-    static class Key {
+    static class EndpointKey {
         private final String host;
         private final int port;
         private final boolean secure;
 
-        Key(URI uri) {
+        EndpointKey(URI uri) {
             host = uri.getHost();
             port = Utils.getPort(uri);
             secure = "https".equalsIgnoreCase(uri.getScheme());
@@ -256,7 +267,7 @@ class HttpConnection {
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
 
-            Key that = (Key) o;
+            EndpointKey that = (EndpointKey) o;
 
             if (port != that.port) return false;
             if (secure != that.secure) return false;
@@ -274,12 +285,8 @@ class HttpConnection {
         }
     }
 
-    interface Listener {
-
-        void onConnect(HttpConnection connection);
+    interface CloseListener {
 
         void onClose(HttpConnection connection);
-
-        void onCompleted(HttpConnection connection);
     }
 }

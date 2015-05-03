@@ -102,7 +102,7 @@ class Filter <UP_IN, UP_OUT, DOWN_OUT, DOWN_IN> {
      * @param address        an address where to connect (server or proxy).
      * @param upstreamFilter a filter positioned upstream.
      */
-    final void connect(SocketAddress address, Filter<?, ?, UP_IN, UP_OUT> upstreamFilter) {
+    void connect(SocketAddress address, Filter<?, ?, UP_IN, UP_OUT> upstreamFilter) {
         this.upstreamFilter = upstreamFilter;
 
         handleConnect(address, upstreamFilter);
