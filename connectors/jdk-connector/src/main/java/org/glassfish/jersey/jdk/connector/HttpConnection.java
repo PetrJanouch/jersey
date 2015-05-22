@@ -101,7 +101,7 @@ class HttpConnection {
                 sslContext = SslConfigurator.getDefaultContext();
 
             }
-            socket = new NewSslFilter(transportFilter, sslContext, uri.getHost(), hostnameVerifier);
+            socket = new SslFilter(transportFilter, sslContext, uri.getHost(), hostnameVerifier);
         } else {
             socket = new TransportFilter(INPUT_BUFFER_SIZE, threadPoolConfig, containerIdleTimeout);
         }

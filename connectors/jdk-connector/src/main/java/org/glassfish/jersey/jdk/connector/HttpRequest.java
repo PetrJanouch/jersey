@@ -42,6 +42,7 @@ package org.glassfish.jersey.jdk.connector;
 
 import javax.ws.rs.core.HttpHeaders;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
 import java.nio.ByteBuffer;
@@ -58,25 +59,24 @@ public class HttpRequest {
     private static String TRANSFER_ENCODING_CHUNKED = "chunked";
     private static String HOST_HEADER = "Host";
 
-
     private final String method;
     private final URI uri;
     private final Map<String, List<String>> headers;
-    private final OutputStreamListener outputStreamListener;
     private final BodyMode bodyMode;
     private final int chunkSize;
-    private final ByteBuffer bufferedBody;
+    private final WriteListener writeListener;
+    private final NioOutputStream bodyStream;
     private final int bodySize;
 
-    private HttpRequest(String method, URI uri, Map<String, List<String>> headers, BodyMode bodyMode, OutputStreamListener outputStreamListener, int bodySize, int chunkSize, ByteBuffer bufferedBody) {
+    private HttpRequest(String method, URI uri, Map<String, List<String>> headers, BodyMode bodyMode, WriteListener writeListener, int bodySize, int chunkSize, NioOutputStream bodyStream) {
         this.method = method;
         this.uri = uri;
         this.headers = headers;
         this.bodyMode =bodyMode;
-        this.outputStreamListener = outputStreamListener;
+        this.writeListener = writeListener;
         this.chunkSize = chunkSize;
-        this.bufferedBody = bufferedBody;
         this.bodySize = bodySize;
+        this.bodyStream = bodyStream;
 
         int port = Utils.getPort(uri);
         addHeaderIfNotPresent(HOST_HEADER, uri.getHost() + ":" + port);
@@ -88,23 +88,19 @@ public class HttpRequest {
         return httpRequest;
     }
 
-    public static HttpRequest createStreamed(String method, URI uri, Map<String, List<String>> headers, int bodySize, OutputStreamListener outputStreamListener) {
-        return new HttpRequest(method, uri, headers, BodyMode.STREAMING, outputStreamListener, bodySize, 0, null);
+    public static HttpRequest createStreamed(String method, URI uri, Map<String, List<String>> headers, int bodySize, WriteListener writeListener) {
+        return new HttpRequest(method, uri, headers, BodyMode.STREAMING, writeListener, bodySize, 0, null);
     }
 
-    public static HttpRequest createChunked(String method, URI uri, Map<String, List<String>> headers, int chunkSize, OutputStreamListener outputStreamListener) {
-        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.CHUNKED, outputStreamListener, 0, chunkSize, null);
+    public static HttpRequest createChunked(String method, URI uri, Map<String, List<String>> headers, int chunkSize, WriteListener writeListener) {
+        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.CHUNKED, writeListener, 0, chunkSize, null);
         httpRequest.addHeaderIfNotPresent(TRANSFER_ENCODING_HEADER, TRANSFER_ENCODING_CHUNKED);
         return httpRequest;
     }
 
-    public static HttpRequest createBuffered(String method, URI uri, Map<String, List<String>> headers, OutputStreamListener outputStreamListener) {
-        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-        outputStreamListener.onReady(byteArrayOutputStream);
-        ByteBuffer bufferedBody = ByteBuffer.wrap(byteArrayOutputStream.toByteArray());
-        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.BUFFERED, null, bufferedBody.remaining(), 0, bufferedBody);
+    public static HttpRequest createBuffered(String method, URI uri, Map<String, List<String>> headers, WriteListener writeListener) throws IOException {
+        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.BUFFERED, writeListener, 0, 0, new BufferedBodyOutputStream());
         httpRequest.addHeaderIfNotPresent(HttpHeaders.CONTENT_LENGTH, Integer.toString(httpRequest.getBodySize()));
-
         return httpRequest;
     }
 
@@ -129,7 +125,15 @@ public class HttpRequest {
     }
 
     ByteBuffer getBufferedBody() {
-        return bufferedBody;
+        return ((BufferedBodyOutputStream)bodyStream).toBuffer();
+    }
+
+    public WriteListener getWriteListener() {
+        return writeListener;
+    }
+
+    public NioOutputStream getBodyStream() {
+        return bodyStream;
     }
 
     void addHeaderIfNotPresent(String name, String value) {
@@ -141,17 +145,8 @@ public class HttpRequest {
         }
     }
 
-    void setBodyOutputStream(OutputStream bodyOutputStream) {
-        outputStreamListener.onReady(bodyOutputStream);
-    }
-
     int getBodySize() {
         return bodySize;
-    }
-
-    static interface OutputStreamListener {
-
-        void onReady(OutputStream outputStream);
     }
 
     enum BodyMode {

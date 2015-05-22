@@ -350,7 +350,7 @@ public class NewSslFilterTest {
             .keyStorePassword("asdfgh");
 
         TransportFilter transportFilter = new TransportFilter(17_000, ThreadPoolConfig.defaultConfig(), 100_000);
-        final NewSslFilter sslFilter = new NewSslFilter(transportFilter, sslConfig.createSSLContext(), host, customHostnameVerifier);
+        final SslFilter sslFilter = new SslFilter(transportFilter, sslConfig.createSSLContext(), host, customHostnameVerifier);
 
         final AtomicReference<Throwable> e = new AtomicReference<>();
         Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer> clientSocket = new Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer>(sslFilter) {

@@ -14,7 +14,7 @@ import java.util.Queue;
 /**
  * Created by petr on 29/03/15.
  */
-class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer> {
+class SslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer> {
 
     private static final ByteBuffer emptyBuffer = ByteBuffer.allocate(0);
 
@@ -47,7 +47,7 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
      *                              if a certificate contains hostname and an IP address of the server is provided here,
      *                              the verification will fail.
      */
-    NewSslFilter(Filter<ByteBuffer, ByteBuffer, ?, ?> downstreamFilter, SSLContext sslContext, String serverHost, HostnameVerifier customHostnameVerifier) {
+    SslFilter(Filter<ByteBuffer, ByteBuffer, ?, ?> downstreamFilter, SSLContext sslContext, String serverHost, HostnameVerifier customHostnameVerifier) {
         super(downstreamFilter);
         this.serverHost = serverHost;
         sslEngine = sslContext.createSSLEngine(serverHost, -1);
@@ -72,18 +72,19 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
     @Override
     synchronized void write(final ByteBuffer applicationData, final CompletionHandler<ByteBuffer> completionHandler) {
         switch (state) {
-            // before SSL is started write just passes through
+            // before SSL is started, write just passes through
             case NOT_STARTED: {
                 writeQueue.write(applicationData, completionHandler);
                 return;
             }
 
             /* TODO:
-             The current model does not permit calling write before SSL handshake is completed, if we allow this
-             we could easily get rid of the onSslHandshakeCompleted event. The SSL filter will simply store the write until
-             the handshake has completed */
+             The current model does not permit calling write before SSL handshake has completed, if we allow this
+             we could easily get rid of the onSslHandshakeCompleted event. The SSL filter can simply store the write until
+             the handshake has completed like during re-handshake. With such a change HANDSHAKING and REHANDSHAKING could
+              be collapsed into one state. */
             case HANDSHAKING: {
-                throw new IllegalStateException("Cannot write until SSL handshake has been completed");
+                completionHandler.failed(new IllegalStateException("Cannot write until SSL handshake has been completed"));
             }
 
             /* Suspend all writes until the re-handshaking is done. Data are permitted during re-handshake in SSL, but this
@@ -116,19 +117,20 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
                 case BUFFER_OVERFLOW: {
                     /* this means that the content of the ssl packet (max 16kB) did not fit into
                        networkOutputBuffer, we make sure to set networkOutputBuffer > max 16kB + SSL headers
-                       when initializing this filter. */
-                    throw new IllegalStateException("SSL packet does not fit into the network buffer: " + networkOutputBuffer + "\n" + getDebugState());
+                       when initializing this filter. This indicates a bug. */
+                    handleError(new IllegalStateException("SSL packet does not fit into the network buffer: " + networkOutputBuffer
+                            + "\n" + getDebugState()));
                 }
 
                 case BUFFER_UNDERFLOW: {
                     /* This basically says that there is not enough data to create an SSL packet. Javadoc suggests that
                     BUFFER_UNDERFLOW can occur only after unwrap(), but to be 100% sure we handle all possible error states: */
-                    throw new IllegalStateException("SSL engine underflow with the following application input: " + applicationData + "\n" + getDebugState());
+                    handleError(new IllegalStateException("SSL engine underflow with the following application input: "
+                            + applicationData + "\n" + getDebugState()));
                 }
 
                 case CLOSED: {
-                    // the engine is closed just abort with failure
-                    completionHandler.failed(new IllegalStateException("SSL session has been closed"));
+                    state = State.CLOSED;
                     break;
                 }
 
@@ -159,11 +161,12 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
             }
 
         } catch (SSLException e) {
-            handleSslError(e);
+            handleError(e);
         }
     }
 
-    private synchronized void handlePostWrite(final ByteBuffer applicationData, final CompletionHandler<ByteBuffer> completionHandler) {
+    private synchronized void handlePostWrite(final ByteBuffer applicationData,
+                                              final CompletionHandler<ByteBuffer> completionHandler) {
         if (state == State.REHANDSHAKING) {
             if (applicationData.hasRemaining()) {
                 // the remaining data will be sent after re-handshake
@@ -185,7 +188,9 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
                                               final CompletionHandler<ByteBuffer> completionHandler) {
         // store the write until re-handshaking is completed
         if (pendingApplicationWrite != null) {
-            throw new WritePendingException();
+            // If this happens it means a bug in this class or upper layer called another write() without waiting
+            // for a completion handler of the previous one.
+            handleError(new IllegalStateException("Only one write operation can be in progress\n" + getDebugState()));
         }
 
         pendingApplicationWrite = new Runnable() {
@@ -210,7 +215,7 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
 
             while (sslEngine.getHandshakeStatus() == SSLEngineResult.HandshakeStatus.NEED_WRAP) {
                 ByteBuffer buffer = lazyBuffer.get();
-                SSLEngineResult result = sslEngine.wrap(buffer, buffer);
+                SSLEngineResult result = sslEngine.wrap(emptyBuffer, buffer);
 
                 switch (result.getStatus()) {
                     case BUFFER_OVERFLOW: {
@@ -220,8 +225,9 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
 
                     case BUFFER_UNDERFLOW: {
                         /* This basically says that there is not enough data to create an SSL packet. Javadoc suggests that
-                        BUFFER_UNDERFLOW can occur only after unwrap(), but to be 100% sure we handle all possible error states: */
-                        throw new IllegalStateException("SSL engine underflow while close operation \n" + getDebugState());
+                        BUFFER_UNDERFLOW can occur only after unwrap(), but to be 100% sure we handle all possible error
+                        states: */
+                        handleError(new IllegalStateException("SSL engine underflow while close operation \n" + getDebugState()));
                     }
 
                     // CLOSE or OK are expected outcomes
@@ -232,7 +238,7 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
             if (lazyBuffer.isAllocated()) {
                 ByteBuffer buffer = lazyBuffer.get();
                 buffer.flip();
-                writeQueue.write(networkOutputBuffer, new CompletionHandler<ByteBuffer>() {
+                writeQueue.write(buffer, new CompletionHandler<ByteBuffer>() {
 
                     @Override
                     public void completed(ByteBuffer result) {
@@ -246,16 +252,20 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
                         upstreamFilter = null;
                     }
                 });
+            } else {
+                // make sure we close even if SSL had nothing to send
+                downstreamFilter.close();
+                upstreamFilter = null;
             }
         } catch (Exception e) {
-            handleSslError(e);
+            handleError(e);
         }
     }
 
     @Override
     synchronized boolean processRead(ByteBuffer networkData) {
-        /* flag indicating if we should keep reading from the network buffer
-        if false, the buffer contains an uncompleted packet -> stop reading, SSLEngine accepts only whole packets */
+        /* A flag indicating if we should keep reading from the network buffer.
+        If false, the buffer contains an uncompleted packet -> stop reading, SSLEngine accepts only whole packets */
         boolean readMore = true;
 
         while (networkData.hasRemaining() && readMore) {
@@ -296,12 +306,13 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
                 case BUFFER_OVERFLOW: {
                     /* This means that the content of the ssl packet (max 16kB) did not fit into
                        applicationInputBuffer, but we make sure to set applicationInputBuffer > max 16kB
-                       when initializing this filter. */
-                    throw new IllegalStateException("Contents of a SSL packet did not fit into buffer: " + applicationInputBuffer);
+                       when initializing this filter. This indicates a bug. */
+                    handleError(new IllegalStateException("Contents of a SSL packet did not fit into buffer: "
+                            + applicationInputBuffer + " \n" + getDebugState()));
                 }
 
                 case BUFFER_UNDERFLOW: {
-                    // the ssl packet is not full return and indicate that we won't get more from this buffer
+                    // the ssl packet is not full, return and indicate that we won't get more from this buffer
                     return false;
                 }
 
@@ -331,7 +342,7 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
                 }
             }
         } catch (SSLException e) {
-            handleSslError(e);
+            handleError(e);
         }
 
         return true;
@@ -349,16 +360,14 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
 
                 switch (hs) {
                     case NOT_HANDSHAKING: {
-                        /* TODO:
+                        /*
                          This should never happen. If we are in this method and not handshaking, it means a bug
-                         in the state machine of this class. Should we be defensive and process the read or throw an
-                         IllegalStateException? Being defensive for the time being. */
+                         in the state machine of this class. We either got into this method when we were not handshaking
+                         or we stop handshaking and did not exit this while loop. The later case would be caused either
+                         by overlooking FINISHED state or incorrectly treating an error. */
 
-                        if (networkData.hasRemaining()) {
-                            // reschedule this like this data came fresh from lower filter
-                            processRead(networkData);
-                        }
-                        return false;
+                        handleError(new IllegalStateException("Trying to handshake, but SSL engine not in HANDSHAKING state." +
+                                "SSL filter state: \n" + getDebugState()));
                     }
 
                     case FINISHED: {
@@ -376,10 +385,6 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
                         ByteBuffer byteBuffer = outputBuffer.get();
                         SSLEngineResult result = sslEngine.wrap(emptyBuffer, byteBuffer);
 
-                        if (result.getStatus() == SSLEngineResult.Status.BUFFER_OVERFLOW) {
-                            outputBuffer.resize();
-                        }
-
                         if (result.getHandshakeStatus() == SSLEngineResult.HandshakeStatus.FINISHED) {
                             stepFinished = true;
                             handshakeFinished = true;
@@ -392,9 +397,11 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
                             }
 
                             case BUFFER_UNDERFLOW: {
-                                /* This basically says that there is not enough data to create an SSL packet. Javadoc suggests that
-                                BUFFER_UNDERFLOW can occur only after unwrap(), but to be 100% sure we handle all possible error states: */
-                                throw new IllegalStateException("SSL engine underflow with the following SSL filter state: \n" + getDebugState());
+                                /* This basically says that there is not enough data to create an SSL packet. Javadoc suggests
+                                that BUFFER_UNDERFLOW can occur only after unwrap(), but to be 100% sure we handle all possible
+                                 error states: */
+                                handleError(new IllegalStateException("SSL engine underflow with the following SSL filter state: \n"
+                                        + getDebugState()));
                             }
 
                             case CLOSED: {
@@ -425,10 +432,11 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
 
                         switch (result.getStatus()) {
                             case BUFFER_OVERFLOW: {
-                                /* this means that the content of the ssl packet (max 16kB) did not fit into
-                                applicationInputBuffer, we make sure to set networkOutputBuffer > max 16kB + SSL headers
-                                when initializing this filter. */
-                                throw new IllegalStateException("SSL packet does not fit into the network buffer: " + getDebugState());
+                                /* This means that the content of the ssl packet (max 16kB) did not fit into
+                                applicationInputBuffer, but we make sure to set applicationInputBuffer > max 16kB
+                                when initializing this filter. This indicates a bug. */
+                                handleError(new IllegalStateException("SSL packet does not fit into the network buffer: "
+                                        + getDebugState()));
                             }
 
                             case BUFFER_UNDERFLOW: {
@@ -460,18 +468,18 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
 
             // now write the stored wrap() results
             if (outputBuffer.isAllocated()) {
-                ByteBuffer byteBuffer = outputBuffer.get();
-                byteBuffer.flip();
-                writeQueue.write(byteBuffer, null);
+                ByteBuffer buffer = outputBuffer.get();
+                buffer.flip();
+                writeQueue.write(buffer, null);
             }
 
             if (handshakeFinished) {
                 handleHandshakeFinished();
-                // indicate that in the input buffer might still be usable data
+                // indicate that there still might be usable data in the input buffer
                 return true;
             }
         } catch (Exception e) {
-            handleSslError(e);
+            handleError(e);
         }
 
         /* if we are here, it means that we are waiting for more data -> indicate that there is nothing usable in the
@@ -482,7 +490,8 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
     private void handleHandshakeFinished() {
         // Apply a custom host verifier if present. Do it for both handshaking and re-handshaking.
         if (customHostnameVerifier != null && !customHostnameVerifier.verify(serverHost, sslEngine.getSession())) {
-            handleSslError(new SSLException("Server host name verification using " + customHostnameVerifier.getClass() + " has failed"));
+            handleError(new SSLException("Server host name verification using " + customHostnameVerifier
+                    .getClass() + " has failed"));
         }
 
 
@@ -501,7 +510,7 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
         }
     }
 
-    private void handleSslError(Throwable t) {
+    private void handleError(Throwable t) {
         onError(t);
     }
 
@@ -512,8 +521,34 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
             sslEngine.beginHandshake();
             doHandshakeStep(emptyBuffer);
         } catch (SSLException e) {
-            handleSslError(e);
+            handleError(e);
         }
+    }
+
+    /**
+     * Only for test.
+     */
+    void rehandshake() {
+        try {
+            sslEngine.beginHandshake();
+        } catch (SSLException e) {
+            handleError(e);
+        }
+    }
+
+    /**
+     * Returns a printed current state of the SslFilter that could be helpful for troubleshooting.
+     */
+    private String getDebugState() {
+        return "SslFilter{"
+                + "\napplicationInputBuffer=" + applicationInputBuffer
+                + ",\nnetworkOutputBuffer=" + networkOutputBuffer
+                + ",\nsslEngineStatus=" + sslEngine.getHandshakeStatus()
+                + ",\nsslSession=" + sslEngine.getSession()
+                + ",\nstate=" + state
+                + ",\npendingApplicationWrite=" + pendingApplicationWrite
+                + ",\npendingWritesSize=" + writeQueue
+                + '}';
     }
 
     private enum State {
@@ -551,35 +586,13 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
         }
     }
 
-    /**
-     * Only for test.
-     */
-    void rehandshake() {
-        try {
-            sslEngine.beginHandshake();
-        } catch (SSLException e) {
-            handleSslError(e);
-        }
-    }
-
-    private String getDebugState() {
-        return "SslFilter{" +
-                "\napplicationInputBuffer=" + applicationInputBuffer +
-                ",\nnetworkOutputBuffer=" + networkOutputBuffer +
-                ",\nsslEngineStatus=" + sslEngine.getHandshakeStatus() +
-                ",\nsslSession=" + sslEngine.getSession() +
-                ",\nstate=" + state +
-                ",\npendingApplicationWrite=" + pendingApplicationWrite +
-                ",\npendingWritesSize=" + writeQueue +
-                '}';
-    }
-
+    // synchronized on the outer class, because there is a danger of deadlock if this has its own lock
     private class WriteQueue {
 
         private final Queue<Runnable> pendingWrites = new LinkedList<>();
 
         void write(final ByteBuffer data, final CompletionHandler<ByteBuffer> completionHandler) {
-            synchronized (NewSslFilter.this) {
+            synchronized (SslFilter.this) {
                 Runnable r = new Runnable() {
                     @Override
                     public void run() {
@@ -616,8 +629,8 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
         }
 
         private void onWriteCompleted() {
-            synchronized (NewSslFilter.this) {
-                // task in progress is at the head of the queue
+            synchronized (SslFilter.this) {
+                // task in progress is at the head of the queue -> remove it
                 pendingWrites.poll();
                 Runnable next = pendingWrites.peek();
 
@@ -629,10 +642,11 @@ class NewSslFilter extends Filter<ByteBuffer, ByteBuffer, ByteBuffer, ByteBuffer
 
         @Override
         public String toString() {
-            synchronized (NewSslFilter.this) {
-                return "WriteQueue{" +
-                        "pendingWrites=" + pendingWrites.size() +
-                        '}';
+            synchronized (SslFilter.this) {
+                return "WriteQueue{"
+                        + "pendingWrites="
+                        + pendingWrites.size()
+                        + '}';
             }
         }
     }
