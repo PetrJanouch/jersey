@@ -1,7 +1,7 @@
 /*
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
  *
- * Copyright (c) 2014 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015 Oracle and/or its affiliates. All rights reserved.
  *
  * The contents of this file are subject to the terms of either the GNU
  * General Public License Version 2 only ("GPL") or the Common Development
@@ -86,32 +86,22 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
                 break;
             }
 
-            case CHUNKED: {
-                ChunkedBodyOutputStream chunkOutputStream = new ChunkedBodyOutputStream(downstreamFilter, httpRequest.getChunkSize()) {
-                    @Override
-                    void onClosed() {
-                        prepareForReply(httpRequest, completionHandler);
-                    }
-                };
-
-                httpRequest.setBodyOutputStream(chunkOutputStream);
-                break;
-            }
-
+            case CHUNKED:
             case STREAMING: {
-                BodyOutputStream streamingOutputStream = new BodyOutputStream(downstreamFilter) {
+                AsynchronousBodyOutputStream bodyStream = (AsynchronousBodyOutputStream)httpRequest.getBodyStream();
+                bodyStream.open(downstreamFilter);
+                bodyStream.setCloseListener(new AsynchronousBodyOutputStream.CloseListener() {
                     @Override
-                    void onClosed() {
+                    public void onClosed() {
                         prepareForReply(httpRequest, completionHandler);
                     }
-                };
-
-                httpRequest.setBodyOutputStream(streamingOutputStream);
+                });
                 break;
             }
 
             case BUFFERED: {
-                downstreamFilter.write(httpRequest.getBufferedBody(), new CompletionHandler<ByteBuffer>() {
+                ByteBuffer body = httpRequest.getBufferedBody();
+                downstreamFilter.write(body, new CompletionHandler<ByteBuffer>() {
                     @Override
                     public void failed(Throwable throwable) {
                         completionHandler.failed(throwable);

@@ -57,12 +57,8 @@ public class ChunkedBodyOutputStreamTest {
     @Test
     public void testBasic() throws IOException {
         ByteBufferInputStream responseBody= new ByteBufferInputStream();
-        ChunkedBodyOutputStream chunkedStream = new ChunkedBodyOutputStream(createMockTransportFilter(responseBody), 20) {
-            @Override
-            void onClosed() {
-
-            }
-        };
+        ChunkedBodyOutputStream chunkedStream = new ChunkedBodyOutputStream(createMockTransportFilter(responseBody),
+                20);
 
         String sentBody = TestUtils.generateBody(500);
         byte[] sentBytes = sentBody.getBytes("ASCII");
@@ -91,7 +87,7 @@ public class ChunkedBodyOutputStreamTest {
         assertEquals(sentBody, receivedBody);
     }
 
-    private Filter<ByteBuffer, ?, ?, ?> createMockTransportFilter(final ByteBufferInputStream responseBody) {
+    Filter<ByteBuffer, ?, ?, ?> createMockTransportFilter(final ByteBufferInputStream responseBody) {
         GrizzlyHttpParser parser = new GrizzlyHttpParser(Integer.MAX_VALUE, Integer.MAX_VALUE);
         parser.reset(true);
         final GrizzlyTransferEncodingParser transferEncodingParser = GrizzlyTransferEncodingParser.createChunkParser(responseBody, parser);

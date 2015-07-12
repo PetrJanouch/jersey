@@ -1,7 +1,7 @@
 /*
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
  *
- * Copyright (c) 2014 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015 Oracle and/or its affiliates. All rights reserved.
  *
  * The contents of this file are subject to the terms of either the GNU
  * General Public License Version 2 only ("GPL") or the Common Development
@@ -53,7 +53,7 @@ import java.util.Map;
 /**
  * Created by petr on 10/12/14.
  */
-public class HttpRequest {
+class HttpRequest {
 
     private static String TRANSFER_ENCODING_HEADER = "Transfer-Encoding";
     private static String TRANSFER_ENCODING_CHUNKED = "chunked";
@@ -63,44 +63,44 @@ public class HttpRequest {
     private final URI uri;
     private final Map<String, List<String>> headers;
     private final BodyMode bodyMode;
-    private final int chunkSize;
-    private final WriteListener writeListener;
-    private final NioOutputStream bodyStream;
-    private final int bodySize;
+    private final BodyOutputStream bodyStream;
 
-    private HttpRequest(String method, URI uri, Map<String, List<String>> headers, BodyMode bodyMode, WriteListener writeListener, int bodySize, int chunkSize, NioOutputStream bodyStream) {
+
+    private HttpRequest(String method, URI uri, Map<String, List<String>> headers, BodyMode bodyMode, BodyOutputStream
+            bodyStream) {
         this.method = method;
         this.uri = uri;
         this.headers = headers;
         this.bodyMode =bodyMode;
-        this.writeListener = writeListener;
-        this.chunkSize = chunkSize;
-        this.bodySize = bodySize;
         this.bodyStream = bodyStream;
 
         int port = Utils.getPort(uri);
         addHeaderIfNotPresent(HOST_HEADER, uri.getHost() + ":" + port);
     }
 
-    public static HttpRequest createBodyless(String method, URI uri, Map<String, List<String>> headers) {
-        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.NONE, null, 0, 0, null);
+    static HttpRequest createBodyless(String method, URI uri, Map<String, List<String>> headers) {
+        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.NONE, null);
         httpRequest.addHeaderIfNotPresent(HttpHeaders.CONTENT_LENGTH, Integer.toString(0));
         return httpRequest;
     }
 
-    public static HttpRequest createStreamed(String method, URI uri, Map<String, List<String>> headers, int bodySize, WriteListener writeListener) {
-        return new HttpRequest(method, uri, headers, BodyMode.STREAMING, writeListener, bodySize, 0, null);
+    static HttpRequest createStreamed(String method, URI uri, Map<String, List<String>> headers, int bodySize) {
+        StreamedBodyOutputStream bodyStream = new StreamedBodyOutputStream(100, bodySize);
+        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.STREAMING, bodyStream);
+        httpRequest.addHeaderIfNotPresent(HttpHeaders.CONTENT_LENGTH, Integer.toString(bodySize));
+        return httpRequest;
     }
 
-    public static HttpRequest createChunked(String method, URI uri, Map<String, List<String>> headers, int chunkSize, WriteListener writeListener) {
-        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.CHUNKED, writeListener, 0, chunkSize, null);
+    static HttpRequest createChunked(String method, URI uri, Map<String, List<String>> headers, int chunkSize) {
+        ChunkedBodyOutputStream bodyStream = new ChunkedBodyOutputStream(chunkSize);
+        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.CHUNKED, bodyStream);
         httpRequest.addHeaderIfNotPresent(TRANSFER_ENCODING_HEADER, TRANSFER_ENCODING_CHUNKED);
         return httpRequest;
     }
 
-    public static HttpRequest createBuffered(String method, URI uri, Map<String, List<String>> headers, WriteListener writeListener) throws IOException {
-        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.BUFFERED, writeListener, 0, 0, new BufferedBodyOutputStream());
-        httpRequest.addHeaderIfNotPresent(HttpHeaders.CONTENT_LENGTH, Integer.toString(httpRequest.getBodySize()));
+    static HttpRequest createBuffered(String method, URI uri, Map<String, List<String>> headers) {
+        BufferedBodyOutputStream bodyOutputStream = new BufferedBodyOutputStream();
+        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.BUFFERED, bodyOutputStream);
         return httpRequest;
     }
 
@@ -120,19 +120,11 @@ public class HttpRequest {
         return bodyMode;
     }
 
-    int getChunkSize() {
-        return chunkSize;
-    }
+    BodyOutputStream getBodyStream() {
+        if (BodyMode.NONE == bodyMode) {
+            throw new IllegalStateException("This HTTP request does not have a body");
+        }
 
-    ByteBuffer getBufferedBody() {
-        return ((BufferedBodyOutputStream)bodyStream).toBuffer();
-    }
-
-    public WriteListener getWriteListener() {
-        return writeListener;
-    }
-
-    public NioOutputStream getBodyStream() {
         return bodyStream;
     }
 
@@ -145,8 +137,12 @@ public class HttpRequest {
         }
     }
 
-    int getBodySize() {
-        return bodySize;
+    ByteBuffer getBufferedBody() {
+        if (BodyMode.BUFFERED != bodyMode) {
+            throw new IllegalStateException("Buffered Body is available only in buffered body mode");
+        }
+
+        return ((BufferedBodyOutputStream) bodyStream).toBuffer();
     }
 
     enum BodyMode {

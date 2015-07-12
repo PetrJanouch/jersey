@@ -1,7 +1,7 @@
 /*
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
  *
- * Copyright (c) 2014 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015 Oracle and/or its affiliates. All rights reserved.
  *
  * The contents of this file are subject to the terms of either the GNU
  * General Public License Version 2 only ("GPL") or the Common Development
@@ -40,7 +40,6 @@
 package org.glassfish.jersey.jdk.connector;
 
 import jersey.repackaged.com.google.common.util.concurrent.SettableFuture;
-import org.glassfish.jersey.SslConfigurator;
 import org.glassfish.jersey.client.ClientProperties;
 import org.glassfish.jersey.client.ClientRequest;
 import org.glassfish.jersey.client.ClientResponse;
@@ -49,8 +48,6 @@ import org.glassfish.jersey.client.spi.AsyncConnectorCallback;
 import org.glassfish.jersey.client.spi.Connector;
 import org.glassfish.jersey.message.internal.OutboundMessageContext;
 
-import javax.net.ssl.HostnameVerifier;
-import javax.net.ssl.SSLContext;
 import javax.ws.rs.ProcessingException;
 import javax.ws.rs.client.Client;
 import javax.ws.rs.core.Configuration;
@@ -58,7 +55,6 @@ import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.CookieManager;
-import java.net.CookiePolicy;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -72,43 +68,16 @@ import java.util.logging.Logger;
  */
 class JdkConnector implements Connector {
 
-    private static final int DEFAULT_MAX_HEADER_SIZE = 100_000;
-    private static final int DEFAULT_MAX_REDIRECTS = 5;
-    private static final CookiePolicy DEFAULT_COOKIE_POLICY = CookiePolicy.ACCEPT_ORIGINAL_SERVER;
-
     private static final Logger LOGGER = Logger.getLogger(JdkConnector.class.getName());
 
-    private final boolean fixLengthStreaming;
-    private final int chunkSize;
     private final HttpConnectionPool httpConnectionPool;
-    private final boolean followRedirects;
-    private final int maxRedirects;
     private final CookieManager cookieManager = new CookieManager();
+    private final ConnectorConfiguration connectorConfiguration;
 
-    JdkConnector(Client client, Configuration config, boolean fixLengthStreaming, int chunkSize) {
-        this.fixLengthStreaming = fixLengthStreaming;
-        this.chunkSize = chunkSize;
-
-        Map<String, Object> properties = config.getProperties();
-        ThreadPoolConfig threadPoolConfig = ClientProperties.getValue(properties, JdkConnectorProvider.WORKER_THREAD_POOL_CONFIG, ThreadPoolConfig.defaultConfig(), ThreadPoolConfig.class);
-        threadPoolConfig.setCorePoolSize(ClientProperties.getValue(properties, ClientProperties.ASYNC_THREADPOOL_SIZE, threadPoolConfig.getCorePoolSize(), Integer.class));
-        Integer containerIdleTimeout = ClientProperties.getValue(properties, JdkConnectorProvider.CONTAINER_IDLE_TIMEOUT, Integer.class);
-
-        Integer maxHeaderSize = ClientProperties.getValue(properties, JdkConnectorProvider.MAX_HEADER_SIZE, DEFAULT_MAX_HEADER_SIZE, Integer.class);
-        followRedirects = ClientProperties.getValue(properties, ClientProperties.FOLLOW_REDIRECTS, true, Boolean.class);
-
-        CookiePolicy cookiePolicy = ClientProperties.getValue(properties, JdkConnectorProvider.COOKIE_POLICY, DEFAULT_COOKIE_POLICY, CookiePolicy.class);
-        cookieManager.setCookiePolicy(cookiePolicy);
-
-        SSLContext sslContext = client.getSslContext();
-        if (sslContext == null) {
-            sslContext = SslConfigurator.getDefaultContext();
-        }
-
-        HostnameVerifier hostnameVerifier = client.getHostnameVerifier();
-        httpConnectionPool = new HttpConnectionPool(100, 20, threadPoolConfig, containerIdleTimeout, maxHeaderSize, sslContext, hostnameVerifier, 30, cookieManager);
-
-        maxRedirects = ClientProperties.getValue(properties, JdkConnectorProvider.MAX_REDIRECTS, DEFAULT_MAX_REDIRECTS, Integer.class);
+    JdkConnector(Client client, Configuration config) {
+        connectorConfiguration = new ConnectorConfiguration(client, config);
+        cookieManager.setCookiePolicy(connectorConfiguration.getCookiePolicy());
+        httpConnectionPool = new HttpConnectionPool(connectorConfiguration, cookieManager);
     }
 
     @Override
@@ -127,7 +96,7 @@ class JdkConnector implements Connector {
         });
 
         try {
-            return (ClientResponse)future.get();
+            return (ClientResponse) future.get();
         } catch (Exception e) {
             // TODO
             throw new ProcessingException(e);
@@ -138,45 +107,17 @@ class JdkConnector implements Connector {
     public Future<?> apply(final ClientRequest request, final AsyncConnectorCallback callback) {
         final SettableFuture<ClientResponse> responseFuture = SettableFuture.create();
 
-        final Object entity = request.getEntity();
-        HttpRequest httpRequest;
-        if (entity != null) {
-            HttpRequest.OutputStreamListener outputListener = new HttpRequest.OutputStreamListener() {
+        HttpRequest httpRequest = createHttpRequest(request);
 
-                @Override
-                public void onReady(final OutputStream outputStream) {
-                    request.setStreamProvider(new OutboundMessageContext.StreamProvider() {
-
-                        @Override
-                        public OutputStream getOutputStream(int contentLength) throws IOException {
-                            return outputStream;
-                        }
-                    });
-                    try {
-                        request.writeEntity();
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                }
-            };
-
-            RequestEntityProcessing entityProcessing = request.resolveProperty(
-                    ClientProperties.REQUEST_ENTITY_PROCESSING, RequestEntityProcessing.class);
-
-            final int length = request.getLength();
-            if (entityProcessing == null && fixLengthStreaming && length > 0) {
-                httpRequest = HttpRequest.createStreamed(request.getMethod(), request.getUri(), translateHeaders(request), length, outputListener);
-            } else if (entityProcessing != null && entityProcessing == RequestEntityProcessing.CHUNKED) {
-                httpRequest = HttpRequest.createChunked(request.getMethod(), request.getUri(), translateHeaders(request), chunkSize, outputListener);
-            } else {
-                httpRequest = HttpRequest.createBuffered(request.getMethod(), request.getUri(), translateHeaders(request), outputListener);
+        if (httpRequest.getBodyMode() == HttpRequest.BodyMode.BUFFERED) {
+            try {
+                request.writeEntity();
+            } catch (IOException e) {
+                callback.failure(e);
             }
-
-        } else {
-            httpRequest = HttpRequest.createBodyless(request.getMethod(), request.getUri(), translateHeaders(request));
         }
 
-        final RedirectHandler redirectHandler = new RedirectHandler(maxRedirects, followRedirects, request.getUri(), httpConnectionPool, request.getMethod(), translateHeaders(request));
+        final RedirectHandler redirectHandler = new RedirectHandler(httpConnectionPool, httpRequest, connectorConfiguration);
         httpConnectionPool.execute(httpRequest, new CompletionHandler<HttpResponse>() {
 
             @Override
@@ -187,17 +128,67 @@ class JdkConnector implements Connector {
 
             @Override
             public void completed(HttpResponse result) {
-                // recursively follow redirects - stop the recursion when the final response arrives
-                if (!redirectHandler.handleRedirects(result, this)) {
-                    return;
-                }
-                ClientResponse response = translate(request, result, redirectHandler.getLastRequestUri());
-                callback.response(response);
-                responseFuture.set(response);
+                redirectHandler.handleRedirects(result, new CompletionHandler<HttpResponse>() {
+                    @Override
+                    public void failed(Throwable throwable) {
+                        callback.failure(throwable);
+                        responseFuture.setException(throwable);
+                    }
+
+                    @Override
+                    public void completed(HttpResponse result) {
+                        ClientResponse response = translate(request, result, redirectHandler.getLastRequestUri());
+                        callback.response(response);
+                        responseFuture.set(response);
+                    }
+                });
             }
         });
 
+        if (httpRequest.getBodyMode() == HttpRequest.BodyMode.STREAMING || httpRequest.getBodyMode() == HttpRequest.BodyMode
+                .CHUNKED) {
+            try {
+                request.writeEntity();
+            } catch (IOException e) {
+                callback.failure(e);
+            }
+        }
+
         return responseFuture;
+    }
+
+    private HttpRequest createHttpRequest(final ClientRequest request) {
+        final Object entity = request.getEntity();
+
+        if (entity == null) {
+            return HttpRequest.createBodyless(request.getMethod(), request.getUri(), translateHeaders(request));
+        }
+
+        RequestEntityProcessing entityProcessing = request.resolveProperty(
+                ClientProperties.REQUEST_ENTITY_PROCESSING, RequestEntityProcessing.class);
+
+        final int length = request.getLength();
+
+        final HttpRequest httpRequest;
+        if (entityProcessing == null && connectorConfiguration.isFixLengthStreaming() && length > 0) {
+            httpRequest = HttpRequest
+                    .createStreamed(request.getMethod(), request.getUri(), translateHeaders(request), length);
+        } else if (entityProcessing != null && entityProcessing == RequestEntityProcessing.CHUNKED) {
+            httpRequest = HttpRequest.createChunked(request.getMethod(), request.getUri(), translateHeaders(request),
+                    connectorConfiguration.getChunkSize());
+        } else {
+            httpRequest= HttpRequest.createBuffered(request.getMethod(), request.getUri(), translateHeaders(request));
+        }
+
+        request.setStreamProvider(new OutboundMessageContext.StreamProvider() {
+
+            @Override
+            public OutputStream getOutputStream(int contentLength) throws IOException {
+                return httpRequest.getBodyStream();
+            }
+        });
+
+        return httpRequest;
     }
 
     private Map<String, List<String>> translateHeaders(ClientRequest clientRequest) {
@@ -212,7 +203,7 @@ class JdkConnector implements Connector {
 
     private ClientResponse translate(final ClientRequest requestContext, final HttpResponse httpResponse, URI requestUri) {
 
-        final ClientResponse responseContext = new ClientResponse(new Response.StatusType() {
+        Response.StatusType statusType = new Response.StatusType() {
             @Override
             public int getStatusCode() {
                 return httpResponse.getStatusCode();
@@ -227,7 +218,9 @@ class JdkConnector implements Connector {
             public String getReasonPhrase() {
                 return httpResponse.getReasonPhrase();
             }
-        }, requestContext, requestUri);
+        };
+
+        final ClientResponse responseContext = new ClientResponse(statusType, requestContext, requestUri);
 
         Map<String, List<String>> headers = httpResponse.getHeaders();
         for (Map.Entry<String, List<String>> entry : headers.entrySet()) {

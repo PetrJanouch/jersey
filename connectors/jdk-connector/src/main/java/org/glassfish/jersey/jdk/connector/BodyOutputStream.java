@@ -1,7 +1,7 @@
 /*
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
  *
- * Copyright (c) 2014 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015 Oracle and/or its affiliates. All rights reserved.
  *
  * The contents of this file are subject to the terms of either the GNU
  * General Public License Version 2 only ("GPL") or the Common Development
@@ -40,62 +40,19 @@
 
 package org.glassfish.jersey.jdk.connector;
 
-import java.io.IOException;
 import java.io.OutputStream;
-import java.nio.ByteBuffer;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Created by petr on 12/12/14.
+ * Created by petr on 06/07/15.
  */
-abstract class BodyOutputStream extends OutputStream {
+public abstract class BodyOutputStream extends OutputStream {
+    /**
+     * By setting this, this stream is switched into asynchronous mode. After this any call to {@link #write} that would result
+     * in blocking throws an exception.
+     *
+     * @param writeListener write listener.
+     */
+    public abstract void setWriteListener(WriteListener writeListener);
 
-    private final Filter<ByteBuffer, ?, ?, ?> downstreamFilter;
-
-    BodyOutputStream(Filter<ByteBuffer, ?, ?, ?> downstreamFilter) {
-        this.downstreamFilter = downstreamFilter;
-    }
-
-    @Override
-    public void write(byte[] b, int off, int len) throws IOException {
-        if (len == 0) {
-            return;
-        }
-
-        ByteBuffer data = ByteBuffer.wrap(b, off, len);
-        final CountDownLatch writeLatch = new CountDownLatch(1);
-        final AtomicReference<Throwable> error = new AtomicReference<>();
-        downstreamFilter.write(data, new CompletionHandler<ByteBuffer>() {
-            @Override
-            public void completed(ByteBuffer result) {
-                writeLatch.countDown();
-            }
-
-            @Override
-            public void failed(Throwable t) {
-                error.set(t);
-                writeLatch.countDown();
-            }
-        });
-
-        if (error.get() != null) {
-            throw new IOException("Writing a chunk failed", error.get());
-        }
-    }
-
-    @Override
-    public void write(int b) throws IOException {
-        byte[] byteArray = new byte[]{(byte) b};
-
-        write(byteArray, 0, 1);
-    }
-
-    @Override
-    public void close() throws IOException {
-        super.close();
-        onClosed();
-    }
-
-    abstract void onClosed();
+    public abstract boolean isReady();
 }

@@ -1,7 +1,7 @@
 /*
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
  *
- * Copyright (c) 2014 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015 Oracle and/or its affiliates. All rights reserved.
  *
  * The contents of this file are subject to the terms of either the GNU
  * General Public License Version 2 only ("GPL") or the Common Development
@@ -51,40 +51,41 @@ import java.util.logging.Logger;
  */
 class RedirectHandler {
 
-    private static final Logger LOGGER = Logger.getLogger(RedirectHandler.class.getName());
-    private static final Set<Integer> REDIRECT_STATUS_CODES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(300, 301, 302, 303, 307, 308)));
+    private static final Logger       LOGGER                = Logger.getLogger(RedirectHandler.class.getName());
+    private static final Set<Integer> REDIRECT_STATUS_CODES = Collections
+            .unmodifiableSet(new HashSet<>(Arrays.asList(300, 301, 302, 303, 307, 308)));
 
-    private final int maxRedirects;
-    private final boolean followRedirects;
-    private final Set<URI> redirectUriHistory;
+    private final int                maxRedirects;
+    private final boolean            followRedirects;
+    private final Set<URI>           redirectUriHistory;
     private final HttpConnectionPool httpConnectionPool;
-    private final String method;
-    private final Map<String, List<String>> headers;
+    private final HttpRequest        originalHttpRequest;
 
     private volatile URI lastRequestUri = null;
 
-    RedirectHandler(int maxRedirects, boolean followRedirects, URI requestUri, HttpConnectionPool httpConnectionPool, String method, Map<String, List<String>> headers) {
-        this.followRedirects = followRedirects;
-        this.maxRedirects = maxRedirects;
-        this.lastRequestUri = requestUri;
+    RedirectHandler(HttpConnectionPool httpConnectionPool, HttpRequest originalHttpRequest,
+                    ConnectorConfiguration connectorConfiguration) {
+        this.followRedirects = connectorConfiguration.getFollowRedirects();
+        this.maxRedirects = connectorConfiguration.getMaxRedirects();
         this.httpConnectionPool = httpConnectionPool;
-        this.method = method;
-        this.headers = headers;
-
+        this.originalHttpRequest = originalHttpRequest;
         this.redirectUriHistory = new HashSet<>(maxRedirects);
     }
 
-    boolean handleRedirects(HttpResponse httpResponse, CompletionHandler<HttpResponse> completionHandler) {
+    void handleRedirects(final HttpResponse httpResponse, final CompletionHandler<HttpResponse> completionHandler) {
         if (!followRedirects) {
-            return true;
+            completionHandler.completed(httpResponse);
+            return;
         }
 
         if (!REDIRECT_STATUS_CODES.contains(httpResponse.getStatusCode())) {
-            return true;
+            completionHandler.completed(httpResponse);
+            return;
         }
 
-        if (!"HEAD".equals(method) &&  !"GET".equals(method)) {
-            return true;
+        if (!"HEAD".equals(originalHttpRequest.getMethod()) && !"GET".equals(originalHttpRequest.getMethod())) {
+            completionHandler.completed(httpResponse);
+            return;
         }
 
         // get location header
@@ -94,10 +95,10 @@ class RedirectHandler {
             locationString = locationHeader.get(0);
         }
 
-        if (locationString == null || locationString.equals("")) {
-            //TODO
-            completionHandler.failed(new RedirectException("Infinite loop in chained redirects detected"));
-            return false;
+        if (locationString == null || locationString.isEmpty()) {
+            completionHandler.failed(new RedirectException("Received redirect that does not contain a location or the location " +
+                    "is empty"));
+            return;
         }
 
         URI location;
@@ -116,31 +117,27 @@ class RedirectHandler {
                 }
             }
         } catch (URISyntaxException e) {
-            // TODO
             completionHandler.failed(new RedirectException("Error determining redirect location", e));
-            return false;
+            return;
         }
 
         // infinite loop detection
         boolean alreadyRequested = !redirectUriHistory.add(location);
         if (alreadyRequested) {
-            //TODO
             completionHandler.failed(new RedirectException("Infinite loop in chained redirects detected"));
-            return false;
+            return;
         }
 
         // maximal number of redirection
         if (redirectUriHistory.size() > maxRedirects) {
-            //TODO
             completionHandler.failed(new RedirectException("Max chained redirect limit (" + maxRedirects + ") exceeded"));
-            return false;
+            return;
         }
 
-        HttpRequest httpRequest = HttpRequest.createBodyless(method, location, headers);
+        final HttpRequest httpRequest = HttpRequest.createBodyless(originalHttpRequest.getMethod(), location, originalHttpRequest.getHeaders());
         lastRequestUri = location;
 
         httpConnectionPool.execute(httpRequest, completionHandler);
-        return false;
     }
 
     URI getLastRequestUri() {

@@ -1,7 +1,7 @@
 /*
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
  *
- * Copyright (c) 2014 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015 Oracle and/or its affiliates. All rights reserved.
  *
  * The contents of this file are subject to the terms of either the GNU
  * General Public License Version 2 only ("GPL") or the Common Development
@@ -40,15 +40,12 @@
 
 package org.glassfish.jersey.jdk.connector;
 
-import org.glassfish.jersey.client.ClientProperties;
-import org.glassfish.jersey.client.internal.LocalizationMessages;
 import org.glassfish.jersey.client.spi.Connector;
 import org.glassfish.jersey.client.spi.ConnectorProvider;
 
 import javax.ws.rs.client.Client;
 import javax.ws.rs.core.Configuration;
-import java.util.Map;
-import java.util.logging.Logger;
+import java.net.CookiePolicy;
 
 /**
  * @author Petr Janouch (petr.janouch at oracle.com)
@@ -67,30 +64,31 @@ public class JdkConnectorProvider implements ConnectorProvider {
 
     public static final String COOKIE_POLICY = "jersey.config.client.JdkConnectorProvider.cookiePolicy";
 
-    private static final Logger LOGGER = Logger.getLogger(JdkConnector.class.getName());
+    public static final String MAX_CONECTIONS_PER_DESTINATION = "jersey.config.client.JdkConnectorProvider" +
+            ".maxConnectionsPerDestination";
+
+    public static final String MAX_CONECTIONS = "jersey.config.client.JdkConnectorProvider" +
+            ".maxConnections";
+
+    public static final String CONNECTION_IDLE_TIMEOUT = "jersey.config.client.JdkConnectorProvider.connectionIdleTimeout";
 
     /**
      * Default chunk size in HTTP chunk-encoded messages.
      */
-    private static final int DEFAULT_HTTP_CHUNK_SIZE = 4096;
+    public static final int DEFAULT_HTTP_CHUNK_SIZE = 4096;
 
-    private int chunkSize = DEFAULT_HTTP_CHUNK_SIZE;
-    private boolean useFixedLengthStreaming = false;
+    public  static final int          DEFAULT_MAX_HEADER_SIZE = 1000;
+    public  static final int          DEFAULT_MAX_REDIRECTS   = 5;
+    public  static final CookiePolicy DEFAULT_COOKIE_POLICY   = CookiePolicy.ACCEPT_ORIGINAL_SERVER;
+    public  static final boolean DEFAULT_USE_FIXED_LENGTH_STREAMING = false;
+    public  static final int DEFAULT_MAX_CONECTIONS_PER_DESTINATION = 20;
+    public  static final int DEFAULT_MAX_CONECTIONS = 100;
+    public  static final int DEFAULT_CONNECTION_IDLE_TIMEOUT = 30;
 
     @Override
     public Connector getConnector(Client client, Configuration config) {
-        final Map<String, Object> properties = config.getProperties();
 
-        int computedChunkSize = ClientProperties.getValue(properties,
-                ClientProperties.CHUNKED_ENCODING_SIZE, chunkSize, Integer.class);
-        if (computedChunkSize < 0) {
-            LOGGER.warning(LocalizationMessages.NEGATIVE_CHUNK_SIZE(computedChunkSize, chunkSize));
-            computedChunkSize = chunkSize;
-        }
 
-        final boolean computedUseFixedLengthStreaming = ClientProperties.getValue(properties,
-                USE_FIXED_LENGTH_STREAMING, useFixedLengthStreaming, Boolean.class);
-
-        return new JdkConnector(client, config, computedUseFixedLengthStreaming, computedChunkSize);
+        return new JdkConnector(client, config);
     }
 }

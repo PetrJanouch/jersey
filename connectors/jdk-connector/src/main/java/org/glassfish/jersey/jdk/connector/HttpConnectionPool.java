@@ -1,7 +1,7 @@
 /*
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
  *
- * Copyright (c) 2014 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015 Oracle and/or its affiliates. All rights reserved.
  *
  * The contents of this file are subject to the terms of either the GNU
  * General Public License Version 2 only ("GPL") or the Common Development
@@ -66,30 +66,15 @@ class HttpConnectionPool {
         }
     });
 
-    private final int maxOpenTotal;
-    private final int maxOpenPerDestination;
-    private final ThreadPoolConfig threadPoolConfig;
-    private final Integer containerIdleTimeout;
-    private final int maxHeaderSize;
-    private final SSLContext sslContext;
-    private final HostnameVerifier hostnameVerifier;
-    private final int connectionTimeout;
+    private final ConnectorConfiguration connectorConfiguration;
     private final CookieManager cookieManager;
 
     private final Map<HttpConnection.EndpointKey, Deque<HttpConnection>> available = new ConcurrentHashMap<>();
     private final Set<HttpConnection> openConnections = Collections.newSetFromMap(new ConcurrentHashMap<HttpConnection, Boolean>());
     private final Deque<CompletionHandler<HttpConnection>> pendingConnectionRequests = new LinkedList<>();
 
-
-    HttpConnectionPool(int maxOpenTotal, int maxOpenPerDestination, ThreadPoolConfig threadPoolConfig, Integer containerIdleTimeout, int maxHeaderSize, SSLContext sslContext, HostnameVerifier hostnameVerifier, int connectionTimeout, CookieManager cookieManager) {
-        this.maxOpenTotal = maxOpenTotal;
-        this.maxOpenPerDestination = maxOpenPerDestination;
-        this.threadPoolConfig = threadPoolConfig;
-        this.containerIdleTimeout = containerIdleTimeout;
-        this.maxHeaderSize = maxHeaderSize;
-        this.sslContext = sslContext;
-        this.hostnameVerifier = hostnameVerifier;
-        this.connectionTimeout = connectionTimeout;
+    HttpConnectionPool(ConnectorConfiguration connectorConfiguration, CookieManager cookieManager) {
+        this.connectorConfiguration = connectorConfiguration;
         this.cookieManager = cookieManager;
     }
 
