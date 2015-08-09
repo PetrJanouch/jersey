@@ -79,109 +79,109 @@ class HttpConnectionPool {
     }
 
     void execute(final HttpRequest request, final CompletionHandler<HttpResponse> completionHandler) {
-        obtainConnection(request, new CompletionHandler<HttpConnection>() {
-            @Override
-            public void failed(Throwable throwable) {
-                completionHandler.failed(throwable);
-            }
-
-            @Override
-            public void completed(HttpConnection connection) {
-                connection.execute(request, new CompletionHandler<HttpResponse>() {
-                    @Override
-                    public void failed(Throwable throwable) {
-                        completionHandler.failed(throwable);
-                    }
-
-                    @Override
-                    public void completed(HttpResponse result) {
-                        completionHandler.completed(result);
-                    }
-                });
-            }
-        });
+//        obtainConnection(request, new CompletionHandler<HttpConnection>() {
+//            @Override
+//            public void failed(Throwable throwable) {
+//                completionHandler.failed(throwable);
+//            }
+//
+//            @Override
+//            public void completed(HttpConnection connection) {
+//                connection.execute(request, new CompletionHandler<HttpResponse>() {
+//                    @Override
+//                    public void failed(Throwable throwable) {
+//                        completionHandler.failed(throwable);
+//                    }
+//
+//                    @Override
+//                    public void completed(HttpResponse result) {
+//                        completionHandler.completed(result);
+//                    }
+//                });
+//            }
+//        });
     }
 
-    private synchronized void obtainConnection(final HttpRequest request, CompletionHandler<HttpConnection> completionHandler) {
-        HttpConnection.EndpointKey key = new HttpConnection.EndpointKey(request.getUri());
-        Queue<HttpConnection> httpConnections = available.get(key);
-        if (httpConnections == null || httpConnections.isEmpty()) {
-            if (canCreateConnection(key)) {
-                createConnection(request.getUri(), completionHandler);
-            } else {
-                pendingConnectionRequests.add(completionHandler);
-            }
-
-        } else {
-            HttpConnection connection = httpConnections.poll();
-            removeFromPool(connection);
-            completionHandler.completed(connection);
-        }
-    }
-
-    private synchronized void releaseConnection(HttpConnection connection) {
-        Deque<HttpConnection> httpConnections = available.get(connection.getKey());
-        if (httpConnections == null) {
-            httpConnections = new LinkedList<>();
-            available.put(connection.getKey(), httpConnections);
-        }
-
-        httpConnections.addFirst(connection);
-       // pendingConnectionRequests
-    }
-
-    void shutDown() {
-        for (HttpConnection connection : openConnections) {
-            connection.close();
-        }
-    }
-
-    private void createConnection(URI uri, final CompletionHandler<HttpConnection> completionHandler) {
-        final HttpConnection connection = new HttpConnection(uri, sslContext, hostnameVerifier, maxHeaderSize, threadPoolConfig, containerIdleTimeout, connectionTimeout, scheduler, cookieManager, new HttpConnection.CloseListener() {
-
-            @Override
-            public void onClose(HttpConnection connection) {
-                openConnections.remove(connection);
-                removeFromPool(connection);
-            }
-        });
-
-        connection.connect(uri, new CompletionHandler<HttpConnection>() {
-            @Override
-            public void failed(Throwable throwable) {
-                completionHandler.failed(throwable);
-            }
-
-            @Override
-            public void completed(HttpConnection result) {
-                openConnections.add(connection);
-                completionHandler.completed(result);
-            }
-        });
-
-    }
-
-    private void removeFromPool(HttpConnection connection) {
-        Queue<HttpConnection> httpConnections = available.get(connection.getKey());
-        if (httpConnections != null) {
-            httpConnections.remove(connection);
-        }
-    }
-
-    private boolean canCreateConnection(HttpConnection.EndpointKey key) {
-        if (openConnections.size() >= maxOpenTotal) {
-            return false;
-        }
-
-        Queue<HttpConnection> httpConnections = available.get(key);
-        if (httpConnections == null) {
-            return true;
-        }
-
-        if (httpConnections.size() < maxOpenPerDestination) {
-            return true;
-        }
-
-        return false;
-    }
+//    private synchronized void obtainConnection(final HttpRequest request, CompletionHandler<HttpConnection> completionHandler) {
+//        HttpConnection.EndpointKey key = new HttpConnection.EndpointKey(request.getUri());
+//        Queue<HttpConnection> httpConnections = available.get(key);
+//        if (httpConnections == null || httpConnections.isEmpty()) {
+//            if (canCreateConnection(key)) {
+//                createConnection(request.getUri(), completionHandler);
+//            } else {
+//                pendingConnectionRequests.add(completionHandler);
+//            }
+//
+//        } else {
+//            HttpConnection connection = httpConnections.poll();
+//            removeFromPool(connection);
+//            completionHandler.completed(connection);
+//        }
+//    }
+//
+//    private synchronized void releaseConnection(HttpConnection connection) {
+//        Deque<HttpConnection> httpConnections = available.get(connection.getKey());
+//        if (httpConnections == null) {
+//            httpConnections = new LinkedList<>();
+//            available.put(connection.getKey(), httpConnections);
+//        }
+//
+//        httpConnections.addFirst(connection);
+//       // pendingConnectionRequests
+//    }
+//
+//    void shutDown() {
+//        for (HttpConnection connection : openConnections) {
+//            connection.close();
+//        }
+//    }
+//
+//    private void createConnection(URI uri, final CompletionHandler<HttpConnection> completionHandler) {
+//        final HttpConnection connection = new HttpConnection(uri, sslContext, hostnameVerifier, maxHeaderSize, threadPoolConfig, containerIdleTimeout, connectionTimeout, scheduler, cookieManager, new HttpConnection.CloseListener() {
+//
+//            @Override
+//            public void onClose(HttpConnection connection) {
+//                openConnections.remove(connection);
+//                removeFromPool(connection);
+//            }
+//        });
+//
+//        connection.connect(uri, new CompletionHandler<HttpConnection>() {
+//            @Override
+//            public void failed(Throwable throwable) {
+//                completionHandler.failed(throwable);
+//            }
+//
+//            @Override
+//            public void completed(HttpConnection result) {
+//                openConnections.add(connection);
+//                completionHandler.completed(result);
+//            }
+//        });
+//
+//    }
+//
+//    private void removeFromPool(HttpConnection connection) {
+//        Queue<HttpConnection> httpConnections = available.get(connection.getKey());
+//        if (httpConnections != null) {
+//            httpConnections.remove(connection);
+//        }
+//    }
+//
+//    private boolean canCreateConnection(HttpConnection.EndpointKey key) {
+//        if (openConnections.size() >= maxOpenTotal) {
+//            return false;
+//        }
+//
+//        Queue<HttpConnection> httpConnections = available.get(key);
+//        if (httpConnections == null) {
+//            return true;
+//        }
+//
+//        if (httpConnections.size() < maxOpenPerDestination) {
+//            return true;
+//        }
+//
+//        return false;
+//    }
 }

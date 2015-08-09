@@ -454,7 +454,7 @@ public class HttpParserTest {
 
     private void verifyReceivedBody(String sentMessage) throws IOException {
         HttpResponse httpResponse = httpParser.getHttpResponse();
-        ByteBufferInputStream bodyStream = httpResponse.getBodyStream();
+        AsynchronousBodyInputStream bodyStream = httpResponse.getBodyStream();
 
         byte[] receivedBytes = new byte[sentMessage.getBytes("ASCII").length];
         int writeIdx = 0;

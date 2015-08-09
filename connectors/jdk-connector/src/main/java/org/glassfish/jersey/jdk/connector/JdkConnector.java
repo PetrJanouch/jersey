@@ -241,6 +241,6 @@ class JdkConnector implements Connector {
 
     @Override
     public void close() {
-        httpConnectionPool.shutDown();
+       // httpConnectionPool.shutDown();
     }
 }

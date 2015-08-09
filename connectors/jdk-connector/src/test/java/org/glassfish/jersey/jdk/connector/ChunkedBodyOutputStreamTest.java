@@ -56,9 +56,8 @@ public class ChunkedBodyOutputStreamTest {
 
     @Test
     public void testBasic() throws IOException {
-        ByteBufferInputStream responseBody= new ByteBufferInputStream();
-        ChunkedBodyOutputStream chunkedStream = new ChunkedBodyOutputStream(createMockTransportFilter(responseBody),
-                20);
+        ByteBufferInputStream responseBody = new ByteBufferInputStream();
+        ChunkedBodyOutputStream chunkedStream = new ChunkedBodyOutputStream(20);
 
         String sentBody = TestUtils.generateBody(500);
         byte[] sentBytes = sentBody.getBytes("ASCII");
@@ -70,13 +69,13 @@ public class ChunkedBodyOutputStreamTest {
 
         byte[] receivedBytes = new byte[sentBytes.length];
 
-        for (int i = 0; i < sentBytes.length; i ++) {
+        for (int i = 0; i < sentBytes.length; i++) {
             int b = responseBody.tryRead();
             if (b == -1) {
                 fail();
             }
 
-            receivedBytes[i] = (byte)b;
+            receivedBytes[i] = (byte) b;
         }
 
         if (responseBody.tryRead() != -1) {
@@ -87,17 +86,17 @@ public class ChunkedBodyOutputStreamTest {
         assertEquals(sentBody, receivedBody);
     }
 
-    Filter<ByteBuffer, ?, ?, ?> createMockTransportFilter(final ByteBufferInputStream responseBody) {
+    Filter<ByteBuffer, ?, ?, ?> createMockTransportFilter(final AsynchronousBodyInputStream responseBody) {
         GrizzlyHttpParser parser = new GrizzlyHttpParser(Integer.MAX_VALUE, Integer.MAX_VALUE);
         parser.reset(true);
         final GrizzlyTransferEncodingParser transferEncodingParser = GrizzlyTransferEncodingParser.createChunkParser(responseBody, parser);
-        return new Filter<ByteBuffer, Void, Void, Void> (null){
+        return new Filter<ByteBuffer, Void, Void, Void>(null) {
 
             @Override
             public void write(ByteBuffer chunk, CompletionHandler<ByteBuffer> completionHandler) {
                 try {
-                    if(transferEncodingParser.parse(chunk)) {
-                        responseBody.closeQueue();
+                    if (transferEncodingParser.parse(chunk)) {
+                        responseBody.onAllDataRead();
                     }
                     completionHandler.completed(chunk);
                 } catch (ParseException e) {

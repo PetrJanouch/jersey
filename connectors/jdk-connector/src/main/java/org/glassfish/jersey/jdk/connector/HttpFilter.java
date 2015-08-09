@@ -151,7 +151,7 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
         }
 
         if (httpParser.isComplete()) {
-            httpParser.getHttpResponse().getBodyStream().closeQueue();
+            httpParser.getHttpResponse().getBodyStream().onAllDataRead();
         }
 
         return false;

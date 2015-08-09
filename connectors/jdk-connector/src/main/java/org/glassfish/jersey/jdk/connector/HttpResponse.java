@@ -56,7 +56,7 @@ public class HttpResponse {
     private final int statusCode;
     private final String reasonPhrase;
     private final Map<String, List<String>> headers = new HashMap<>();
-    private final ByteBufferInputStream bodyStream;
+    private final AsynchronousBodyInputStream bodyStream;
 
     private volatile boolean bodyReceived;
     private volatile BodyReceivedListener bodyReceivedListener = null;
@@ -66,7 +66,7 @@ public class HttpResponse {
         this.protocolVersion = protocolVersion;
         this.statusCode = statusCode;
         this.reasonPhrase = reasonPhrase;
-        bodyStream = new ByteBufferInputStream();
+        bodyStream = new AsynchronousBodyInputStream();
     }
 
     public String getProtocolVersion() {
@@ -121,11 +121,9 @@ public class HttpResponse {
         values.add(value);
     }
 
-    ByteBufferInputStream getBodyStream() {
+    AsynchronousBodyInputStream getBodyStream() {
         return bodyStream;
     }
-
-
 
     interface BodyReceivedListener {
 

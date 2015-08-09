@@ -41,6 +41,7 @@
 package org.glassfish.jersey.jdk.connector;
 
 import javax.ws.rs.core.HttpHeaders;
+
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -127,7 +128,7 @@ class GrizzlyHttpParser {
         }
 
         if (complete) {
-            httpResponse.getBodyStream().closeQueue();
+            httpResponse.getBodyStream().onAllDataRead();
         }
     }
 

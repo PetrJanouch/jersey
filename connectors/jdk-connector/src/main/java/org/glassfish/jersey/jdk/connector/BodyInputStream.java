@@ -37,43 +37,43 @@
  * only if the new code is made subject to such option by the copyright
  * holder.
  */
-
 package org.glassfish.jersey.jdk.connector;
 
-import java.io.IOException;
-import java.util.EventListener;
+import org.glassfish.jersey.internal.util.collection.NonBlockingInputStream;
 
 /**
- * <p>
- * This class represents a call-back mechanism that will notify implementations
- * as HTTP request data becomes available to be read without blocking.
- * </p>
- *
- * Taken from Servlet 3.1
+ * Created by petr on 08/08/15.
  */
-public interface ReadListener extends EventListener {
+public abstract class BodyInputStream extends NonBlockingInputStream {
 
-    /**
-     * When an instance of the <code>ReadListener</code> is registered with a {@link ServletInputStream},
-     * this method will be invoked by the container the first time when it is possible
-     * to read data. Subsequently the container will invoke this method if and only
-     * if {@link javax.servlet.ServletInputStream#isReady()} method
-     * has been called and has returned <code>false</code>.
-     *
-     * @throws java.io.IOException if an I/O related error has occurred during processing
-     */
-    void onDataAvailable();
+  /**
+   * Returns true if data can be read without blocking else returns
+   * false.
+   *
+   * @return <code>true</code> if data can be obtained without blocking,
+   *  otherwise returns <code>false</code>.
+   *
+   * @since Servlet 3.1
+   */
+  public abstract boolean isReady();
 
-    /**
-     * Invoked when all data for the current request has been read.
-     *
-     * @throws IOException if an I/O related error has occurred during processing
-     */
+  /**
+   * Instructs the <code>ServletInputStream</code> to invoke the provided
+   * {@link ReadListener} when it is possible to read
+   *
+   * @param readListener the {@link ReadListener} that should be notified
+   *  when it's possible to read.
+   *
+   * @exception IllegalStateException if one of the following conditions is true
+   * <ul>
+   * <li>the associated request is neither upgraded nor the async started
+   * <li>setReadListener is called more than once within the scope of the same request.
+   * </ul>
+   *
+   * @throws NullPointerException if readListener is null
+   *
+   * @since Servlet 3.1
 
-    void onAllDataRead();
-
-    /**
-     * Invoked when an error occurs processing the request.
-     */
-    void onError(Throwable t);
+   */
+  public abstract void setReadListener(ReadListener readListener);
 }
