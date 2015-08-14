@@ -90,7 +90,7 @@ public class AsynchronousBodyInputStreamTest {
 
     @Test
     public void testListenerExecutor() throws InterruptedException {
-        AsynchronousBodyInputStream stream = new AsynchronousBodyInputStream();
+        final AsynchronousBodyInputStream stream = new AsynchronousBodyInputStream();
         ExecutorService executor = Executors.newSingleThreadExecutor();
         Thread mainThread = Thread.currentThread();
         final AtomicReference<Thread> dataAvailableThread = new AtomicReference<>();
@@ -102,6 +102,13 @@ public class AsynchronousBodyInputStreamTest {
                 @Override
                 public void onDataAvailable() {
                     dataAvailableThread.set(Thread.currentThread());
+                    while (stream.isReady()) {
+                        try {
+                            stream.read();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
                 }
 
                 @Override
@@ -451,6 +458,4 @@ public class AsynchronousBodyInputStreamTest {
             return new String(receivedData.toByteArray());
         }
     }
-
-
 }

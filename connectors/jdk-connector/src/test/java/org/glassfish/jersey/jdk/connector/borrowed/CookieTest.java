@@ -38,40 +38,42 @@
  * holder.
  */
 
-package org.glassfish.jersey.jdk.connector;
+package org.glassfish.jersey.jdk.connector.borrowed;
 
 import org.glassfish.jersey.client.ClientConfig;
-import org.glassfish.jersey.client.HttpUrlConnectorProvider;
+import org.glassfish.jersey.jdk.connector.JdkConnectorProvider;
 import org.glassfish.jersey.server.ResourceConfig;
 import org.glassfish.jersey.test.JerseyTest;
 import org.junit.Test;
 
-import javax.ws.rs.*;
-import javax.ws.rs.client.Entity;
-import javax.ws.rs.client.SyncInvoker;
-import javax.ws.rs.core.Application;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
+import javax.ws.rs.GET;
+import javax.ws.rs.Path;
+import javax.ws.rs.client.WebTarget;
+import javax.ws.rs.core.*;
+import java.net.CookiePolicy;
 
 import static org.junit.Assert.assertEquals;
 
 /**
- * Created by petr on 14/01/15.
+ * @author Paul Sandoz (paul.sandoz at oracle.com)
+ * @author Arul Dhesiaseelan (aruld at acm.org)
  */
-public class EchoTest extends JerseyTest {
+public class CookieTest extends JerseyTest {
 
-    @Path("/echo")
-    public static class EchoResource {
-
-        @POST
-        public String post(String entity) {
-            return entity;
+    @Path("/CookieResource")
+    public static class CookieResource {
+        @GET
+        public Response get(@Context HttpHeaders h) {
+            Cookie c = h.getCookies().get("name");
+            String e = (c == null) ? "NO-COOKIE" : c.getValue();
+            return Response.ok(e).
+                    cookie(new NewCookie("name", "value")).build();
         }
     }
 
     @Override
     protected Application configure() {
-        return new ResourceConfig(EchoResource.class);
+        return new ResourceConfig(CookieResource.class);
     }
 
     @Override
@@ -80,9 +82,20 @@ public class EchoTest extends JerseyTest {
     }
 
     @Test
-    public void testEcho() {
-        String message = "My awesome message";
-        Response response = target("echo").request().post(Entity.entity("My awesome message",MediaType.TEXT_PLAIN));
-        assertEquals(message, response.readEntity(String.class));
+    public void testCookieResource() {
+        // the default cookie policy does not like cookies from localhost
+        WebTarget target = target("CookieResource").property(JdkConnectorProvider.COOKIE_POLICY, CookiePolicy.ACCEPT_ALL);
+
+        assertEquals("NO-COOKIE", target.request().get(String.class));
+        assertEquals("value", target.request().get(String.class));
+    }
+
+    @Test
+    public void testDisabledCookies() {
+        // the default cookie policy does not like cookies from localhost
+        WebTarget target = target("CookieResource").property(JdkConnectorProvider.COOKIE_POLICY, CookiePolicy.ACCEPT_NONE);
+
+        assertEquals("NO-COOKIE", target.request().get(String.class));
+        assertEquals("NO-COOKIE", target.request().get(String.class));
     }
 }

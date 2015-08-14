@@ -38,10 +38,11 @@
  * holder.
  */
 
-package org.glassfish.jersey.jdk.connector;
+package org.glassfish.jersey.jdk.connector.borrowed;
 
 import org.glassfish.jersey.client.ClientConfig;
 import org.glassfish.jersey.client.ClientProperties;
+import org.glassfish.jersey.jdk.connector.JdkConnectorProvider;
 import org.glassfish.jersey.server.ChunkedOutput;
 import org.glassfish.jersey.server.ResourceConfig;
 import org.glassfish.jersey.test.JerseyTest;

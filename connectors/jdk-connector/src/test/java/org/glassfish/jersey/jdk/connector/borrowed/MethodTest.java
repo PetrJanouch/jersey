@@ -38,41 +38,56 @@
  * holder.
  */
 
-package org.glassfish.jersey.jdk.connector;
+package org.glassfish.jersey.jdk.connector.borrowed;
 
 import org.glassfish.jersey.client.ClientConfig;
+import org.glassfish.jersey.jdk.connector.JdkConnectorProvider;
 import org.glassfish.jersey.server.ResourceConfig;
 import org.glassfish.jersey.test.JerseyTest;
 import org.junit.Test;
 
-import javax.ws.rs.GET;
-import javax.ws.rs.Path;
-import javax.ws.rs.client.WebTarget;
-import javax.ws.rs.core.*;
-import java.net.CookiePolicy;
+import javax.ws.rs.*;
+import javax.ws.rs.client.Entity;
+import javax.ws.rs.core.Application;
+import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
 
 import static org.junit.Assert.assertEquals;
 
 /**
- * @author Paul Sandoz (paul.sandoz at oracle.com)
- * @author Arul Dhesiaseelan (aruld at acm.org)
+ * Created by petr on 15/01/15.
  */
-public class CookieTest extends JerseyTest {
+// TODO: Borrowed from Grizzly connector, decide if to keep
+public class MethodTest extends JerseyTest {
 
-    @Path("/CookieResource")
-    public static class CookieResource {
+    private static final String PATH = "test";
+
+    @Path("/test")
+    public static class HttpMethodResource {
         @GET
-        public Response get(@Context HttpHeaders h) {
-            Cookie c = h.getCookies().get("name");
-            String e = (c == null) ? "NO-COOKIE" : c.getValue();
-            return Response.ok(e).
-                    cookie(new NewCookie("name", "value")).build();
+        public String get() {
+            return "GET";
+        }
+
+        @POST
+        public String post(String entity) {
+            return entity;
+        }
+
+        @PUT
+        public String put(String entity) {
+            return entity;
+        }
+
+        @DELETE
+        public String delete() {
+            return "DELETE";
         }
     }
 
     @Override
     protected Application configure() {
-        return new ResourceConfig(CookieResource.class);
+        return new ResourceConfig(HttpMethodResource.class);
     }
 
     @Override
@@ -81,20 +96,32 @@ public class CookieTest extends JerseyTest {
     }
 
     @Test
-    public void testCookieResource() {
-        // the default cookie policy does not like cookies from localhost
-        WebTarget target = target("CookieResource").property(JdkConnectorProvider.COOKIE_POLICY, CookiePolicy.ACCEPT_ALL);
-
-        assertEquals("NO-COOKIE", target.request().get(String.class));
-        assertEquals("value", target.request().get(String.class));
+    public void testGet() {
+        Response response = target(PATH).request().get();
+        assertEquals("GET", response.readEntity(String.class));
     }
 
     @Test
-    public void testDisabledCookies() {
-        // the default cookie policy does not like cookies from localhost
-        WebTarget target = target("CookieResource").property(JdkConnectorProvider.COOKIE_POLICY, CookiePolicy.ACCEPT_NONE);
+    public void testPost() {
+        Response response = target(PATH).request().post(Entity.entity("POST", MediaType.TEXT_PLAIN));
+        assertEquals("POST", response.readEntity(String.class));
+    }
 
-        assertEquals("NO-COOKIE", target.request().get(String.class));
-        assertEquals("NO-COOKIE", target.request().get(String.class));
+    @Test
+    public void testPut() {
+        Response response = target(PATH).request().put(Entity.entity("PUT", MediaType.TEXT_PLAIN));
+        assertEquals("PUT", response.readEntity(String.class));
+    }
+
+    @Test
+    public void testDelete() {
+        Response response = target(PATH).request().delete();
+        assertEquals("DELETE", response.readEntity(String.class));
+    }
+
+    @Test
+    public void testHead() {
+        Response response = target(PATH).request().head();
+        assertEquals("", response.readEntity(String.class));
     }
 }

@@ -44,7 +44,10 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
+
+import org.glassfish.jersey.internal.util.collection.ByteBufferInputStream;
 
 /**
  * Abstract body output stream that supports both synchronous and asynchronous operations.
@@ -56,15 +59,17 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p/>
  * The asynchronous mode is inspired by servlet 3.1 with analogy in operations {@link #setWriteListener(WriteListener)}, {@link
  * #isReady()} and write callback {@link WriteListener}.
- *
  */
 abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
 
-    protected       Filter<ByteBuffer, ?, ?, ?> downstreamFilter;
-    protected final ByteBuffer                  dataBuffer;
-    protected WriteListener writeListener = null;
-    protected CloseListener closeListener;
-    protected boolean ready = false;
+    private volatile Filter<ByteBuffer, ?, ?, ?> downstreamFilter;
+    private final ByteBuffer dataBuffer;
+    private WriteListener writeListener = null;
+    private CloseListener closeListener;
+    private Mode mode = Mode.UNDECIDED;
+    private boolean ready = false;
+    // flag to make sure that a listener is called only for the first time or after isReady() returned false
+    private boolean callListener = true;
 
     private final CountDownLatch initialLatch = new CountDownLatch(1);
 
@@ -78,14 +83,18 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
             throw new IllegalStateException("Write listener can be set only once");
         }
 
+        assertAsynchronousOperation();
         this.writeListener = writeListener;
-        if (ready) {
-            writeListener.onWritePossible();
+        commitMode();
+
+        if (ready && callListener) {
+            callOnWritePossible();
         }
     }
 
     @Override
     public void write(byte[] b, int off, int len) throws IOException {
+        commitMode();
         // input validation borrowed from a parent
         if (b == null) {
             throw new NullPointerException();
@@ -98,14 +107,17 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
 
         assertValidState();
         doInitialBlocking();
+
         if (len < dataBuffer.remaining()) {
             for (int i = off; i < len; i++) {
                 write(b[i]);
             }
         } else {
             ByteBuffer buffer = ByteBuffer.allocate(dataBuffer.position() + len);
+            dataBuffer.flip();
             buffer.put(dataBuffer);
             buffer.put(b, off, len);
+            buffer.flip();
             write(buffer);
         }
     }
@@ -113,26 +125,41 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
     @Override
     public void flush() throws IOException {
         super.flush();
+
+        if (mode == Mode.ASYNCHRONOUS && !ready) {
+            /* There is no point doing flush while async write to transport is in progress. No new data could have been
+            written since the write to transport started, so all the current content of the data buffer will be written. */
+            return;
+        }
+
+        dataBuffer.flip();
         write(dataBuffer);
     }
 
     @Override
     public void write(int b) throws IOException {
+        commitMode();
         assertValidState();
         doInitialBlocking();
         dataBuffer.put((byte) b);
         if (!dataBuffer.hasRemaining()) {
+            dataBuffer.flip();
             write(dataBuffer);
         }
     }
 
     @Override
     public boolean isReady() {
+        assertAsynchronousOperation();
+
+        if (!ready) {
+            callListener = true;
+        }
         return ready;
     }
 
     private void assertValidState() {
-        if (writeListener != null && !ready) {
+        if (mode == Mode.ASYNCHRONOUS && !ready) {
             // we are in asynchronous mode, but the user called write when the stream in non-ready state
             throw new IllegalStateException("Asynchronous write called when stream is in non-ready state");
         }
@@ -140,7 +167,7 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
 
     protected void write(ByteBuffer byteBuffer) throws IOException {
         ByteBuffer httpChunk = encodeHttp(byteBuffer);
-        if (writeListener == null) {
+        if (mode == Mode.SYNCHRONOUS) {
             final CountDownLatch writeLatch = new CountDownLatch(1);
             final AtomicReference<Throwable> error = new AtomicReference<>();
             downstreamFilter.write(httpChunk, new CompletionHandler<ByteBuffer>() {
@@ -156,6 +183,11 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
                 }
             });
 
+            try {
+                writeLatch.await();
+            } catch (InterruptedException e) {
+                throw new IOException("Writing data failed", e);
+            }
             dataBuffer.clear();
 
             Throwable t = error.get();
@@ -168,19 +200,16 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
 
                 @Override
                 public void completed(ByteBuffer result) {
-                    boolean callListener = false;
-                    if (!ready) {
-                        callListener = true;
-                    }
                     ready = true;
                     dataBuffer.clear();
                     if (callListener) {
-                        writeListener.onWritePossible();
+                        callOnWritePossible();
                     }
                 }
 
                 @Override
                 public void failed(Throwable throwable) {
+                    ready = false;
                     writeListener.onError(throwable);
                 }
             });
@@ -192,13 +221,13 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
         initialLatch.countDown();
         ready = true;
 
-        if (writeListener != null) {
-            writeListener.onWritePossible();
+        if (mode == Mode.ASYNCHRONOUS && writeListener != null) {
+            callOnWritePossible();
         }
     }
 
     void doInitialBlocking() throws IOException {
-        if (downstreamFilter != null) {
+        if (mode != Mode.SYNCHRONOUS || downstreamFilter != null) {
             return;
         }
 
@@ -207,6 +236,33 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
         } catch (InterruptedException e) {
             throw new IOException(e);
         }
+    }
+
+    private synchronized void commitMode() {
+        // return if the mode has already been committed
+        if (mode != Mode.UNDECIDED) {
+            return;
+        }
+
+        // go asynchronous, if the user has made any move suggesting asynchronous mode
+        if (writeListener != null) {
+            mode = Mode.ASYNCHRONOUS;
+            return;
+        }
+
+        // go synchronous, if the user has not made any suggesting asynchronous mode
+        mode = Mode.SYNCHRONOUS;
+    }
+
+    private void assertAsynchronousOperation() {
+        if (mode == Mode.SYNCHRONOUS) {
+            throw new UnsupportedOperationException("Operation not supported in synchronous mode");
+        }
+    }
+
+    private void callOnWritePossible() {
+        callListener = false;
+        writeListener.onWritePossible();
     }
 
     /**
@@ -245,5 +301,11 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
     interface CloseListener {
 
         void onClosed();
+    }
+
+    private enum Mode {
+        SYNCHRONOUS,
+        ASYNCHRONOUS,
+        UNDECIDED
     }
 }

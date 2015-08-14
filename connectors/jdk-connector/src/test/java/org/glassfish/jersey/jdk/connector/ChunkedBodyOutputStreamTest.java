@@ -40,11 +40,10 @@
 
 package org.glassfish.jersey.jdk.connector;
 
-import org.glassfish.jersey.internal.util.collection.ByteBufferInputStream;
-import org.junit.Test;
-
 import java.io.IOException;
 import java.nio.ByteBuffer;
+
+import org.junit.Test;
 
 import static junit.framework.Assert.assertEquals;
 import static junit.framework.TestCase.fail;
@@ -56,11 +55,13 @@ public class ChunkedBodyOutputStreamTest {
 
     @Test
     public void testBasic() throws IOException {
-        ByteBufferInputStream responseBody = new ByteBufferInputStream();
+        AsynchronousBodyInputStream responseBody = new AsynchronousBodyInputStream();
         ChunkedBodyOutputStream chunkedStream = new ChunkedBodyOutputStream(20);
+        Filter<ByteBuffer, ?, ?, ?> mockTransportFilter = createMockTransportFilter(responseBody);
+        chunkedStream.open(mockTransportFilter);
 
         String sentBody = TestUtils.generateBody(500);
-        byte[] sentBytes = sentBody.getBytes("ASCII");
+        byte[] sentBytes = sentBody.getBytes();
         for (byte b : sentBytes) {
             chunkedStream.write(b);
         }
@@ -82,7 +83,7 @@ public class ChunkedBodyOutputStreamTest {
             fail();
         }
 
-        String receivedBody = new String(receivedBytes, "ASCII");
+        String receivedBody = new String(receivedBytes);
         assertEquals(sentBody, receivedBody);
     }
 

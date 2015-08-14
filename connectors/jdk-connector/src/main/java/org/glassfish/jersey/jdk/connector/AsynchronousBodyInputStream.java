@@ -76,6 +76,7 @@ public class AsynchronousBodyInputStream extends BodyInputStream {
     public synchronized boolean isReady() {
         assertAsynchronousOperation();
 
+        // return false if this stream has not been initialised
         if (mode == Mode.UNDECIDED) {
             return false;
         }
@@ -112,9 +113,6 @@ public class AsynchronousBodyInputStream extends BodyInputStream {
         }
 
         assertAsynchronousOperation();
-        if (mode == Mode.SYNCHRONOUS) {
-            throw new IllegalStateException("Read listener not supported in synchronous mode");
-        }
 
         this.readListener = readListener;
         commitMode();
@@ -250,13 +248,13 @@ public class AsynchronousBodyInputStream extends BodyInputStream {
             return;
         }
 
+        this.t = t;
+        data.add(ERROR);
+
         if (mode == Mode.ASYNCHRONOUS && callReadListener) {
             callOnError(t);
             return;
         }
-
-        this.t = t;
-        data.add(ERROR);
     }
 
     synchronized void onAllDataRead() {
@@ -274,25 +272,31 @@ public class AsynchronousBodyInputStream extends BodyInputStream {
     }
 
     private synchronized void commitMode() {
-        if (mode == Mode.UNDECIDED) {
-            if (readListener != null || listenerExecutor != null) {
-                mode = Mode.ASYNCHRONOUS;
+        // return if the mode has already been committed
+        if (mode != Mode.UNDECIDED) {
+            return;
+        }
+
+        // go asynchronous, if the user has made any move suggesting asynchronous mode
+        if (readListener != null || listenerExecutor != null) {
+            mode = Mode.ASYNCHRONOUS;
+            return;
+        }
+
+        // go synchronous, if the user has not made any suggesting asynchronous mode
+        mode = Mode.SYNCHRONOUS;
+        synchronousStream = new ByteBufferInputStream();
+        // move all buffered data to synchronous stream
+        for (ByteBuffer b : data) {
+            if (b == EOF) {
+                synchronousStream.closeQueue();
+            } else if (b == ERROR) {
+                synchronousStream.closeQueue(t);
             } else {
-                mode = Mode.SYNCHRONOUS;
-                synchronousStream = new ByteBufferInputStream();
-                // move all buffered data to synchronous stream
-                for (ByteBuffer b : data) {
-                    if (b == EOF) {
-                        synchronousStream.closeQueue();
-                    } else if (b == ERROR) {
-                        synchronousStream.closeQueue(t);
-                    } else {
-                        try {
-                            synchronousStream.put(b);
-                        } catch (InterruptedException e) {
-                            synchronousStream.closeQueue(e);
-                        }
-                    }
+                try {
+                    synchronousStream.put(b);
+                } catch (InterruptedException e) {
+                    synchronousStream.closeQueue(e);
                 }
             }
         }
@@ -333,6 +337,7 @@ public class AsynchronousBodyInputStream extends BodyInputStream {
     }
 
     private void callDataAvailable() {
+        callReadListener = false;
         if (listenerExecutor == null) {
             readListener.onDataAvailable();
         } else {
