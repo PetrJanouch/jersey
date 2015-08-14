@@ -44,10 +44,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
-
-import org.glassfish.jersey.internal.util.collection.ByteBufferInputStream;
 
 /**
  * Abstract body output stream that supports both synchronous and asynchronous operations.
@@ -65,7 +62,7 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
     private volatile Filter<ByteBuffer, ?, ?, ?> downstreamFilter;
     private final ByteBuffer dataBuffer;
     private WriteListener writeListener = null;
-    private CloseListener closeListener;
+    private Listener closeListener;
     private Mode mode = Mode.UNDECIDED;
     private boolean ready = false;
     // flag to make sure that a listener is called only for the first time or after isReady() returned false
@@ -217,6 +214,7 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
     }
 
     void open(Filter<ByteBuffer, ?, ?, ?> downstreamFilter) {
+        closeListener.onOpened();
         this.downstreamFilter = downstreamFilter;
         initialLatch.countDown();
         ready = true;
@@ -272,7 +270,7 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
      *
      * @param closeListener close listener.
      */
-    void setCloseListener(CloseListener closeListener) {
+    void setCloseListener(Listener closeListener) {
         this.closeListener = closeListener;
     }
 
@@ -298,7 +296,9 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
      * <p/>
      * This is used to indicate that the body has been completely written.
      */
-    interface CloseListener {
+    interface Listener {
+
+        void onOpened();
 
         void onClosed();
     }

@@ -90,7 +90,7 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
             case STREAMING: {
                 AsynchronousBodyOutputStream bodyStream = (AsynchronousBodyOutputStream)httpRequest.getBodyStream();
                 bodyStream.open(downstreamFilter);
-                bodyStream.setCloseListener(new AsynchronousBodyOutputStream.CloseListener() {
+                bodyStream.setCloseListener(new AsynchronousBodyOutputStream.Listener() {
                     @Override
                     public void onClosed() {
                         prepareForReply(httpRequest, completionHandler);

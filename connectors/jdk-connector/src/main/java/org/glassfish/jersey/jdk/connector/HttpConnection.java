@@ -40,10 +40,6 @@
 
 package org.glassfish.jersey.jdk.connector;
 
-import org.glassfish.jersey.SslConfigurator;
-
-import javax.net.ssl.HostnameVerifier;
-import javax.net.ssl.SSLContext;
 import java.io.IOException;
 import java.net.CookieManager;
 import java.net.InetSocketAddress;
@@ -51,14 +47,15 @@ import java.net.URI;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
+
+import javax.net.ssl.SSLContext;
+
+import org.glassfish.jersey.SslConfigurator;
 
 /**
- * Created by petr on 16/01/15.
+ * Created by petr on 14/08/15.
  */
-class HttpConnection {
+public class HttpConnection {
 
     /**
      * Input buffer that is used by {@link org.glassfish.jersey.jdk.connector.TransportFilter} when SSL is turned on.
@@ -74,219 +71,176 @@ class HttpConnection {
     private static final int INPUT_BUFFER_SIZE = 2048;
 
     private final Filter<HttpRequest, HttpResponse, HttpRequest, HttpResponse> filterChain;
-    private final CloseListener listener;
-    private final EndpointKey key;
-    private final int connectionTimeout;
-    private final ScheduledExecutorService scheduler;
     private final CookieManager cookieManager;
+    private final URI uri;
+    private final ConnectionStateListener stateListener;
 
-    private CompletionHandler<HttpConnection> connectCompletionHandler = null;
-    private CompletionHandler<HttpResponse> responseCompletionHandler = null;
-    private ScheduledFuture<?> scheduledClose;
-    private URI requestUri;
+    private HttpRequest httpRequest;
+    private HttpResponse httResponse;
+    private Throwable error;
+    private State state = State.CREATED;
 
-    HttpConnection(URI uri, SSLContext sslContext, HostnameVerifier hostnameVerifier, int maxHeaderSize, ThreadPoolConfig threadPoolConfig, Integer containerIdleTimeout, int connectionTimeout, ScheduledExecutorService scheduler, final CookieManager cookieManager, final CloseListener listener) {
-        this.listener = listener;
-        this.connectionTimeout = connectionTimeout;
-        this.scheduler = scheduler;
+    public HttpConnection(URI uri, CookieManager cookieManager, ConnectorConfiguration configuration, ConnectionStateListener stateListener) {
+        this.uri = uri;
         this.cookieManager = cookieManager;
-        //List<Proxy> proxies = processProxy(properties, uri);
-        key = new EndpointKey(uri);
-
-        boolean secure = "https".equals(uri.getScheme());
-        Filter<ByteBuffer, ByteBuffer, ?, ?> socket;
-        if (secure) {
-            TransportFilter transportFilter = new TransportFilter(SSL_INPUT_BUFFER_SIZE, threadPoolConfig, containerIdleTimeout);
-            if (sslContext == null) {
-                sslContext = SslConfigurator.getDefaultContext();
-
-            }
-            socket = new SslFilter(transportFilter, sslContext, uri.getHost(), hostnameVerifier);
-        } else {
-            socket = new TransportFilter(INPUT_BUFFER_SIZE, threadPoolConfig, containerIdleTimeout);
-        }
-
-        final HttpFilter httpFilter = new HttpFilter(socket, maxHeaderSize, maxHeaderSize + INPUT_BUFFER_SIZE);
-
-        filterChain = new Filter<HttpRequest, HttpResponse, HttpRequest, HttpResponse>(httpFilter) {
-
-            @Override
-            boolean processRead(HttpResponse response) {
-                scheduleTimeout();
-
-                try {
-                    cookieManager.put(requestUri, response.getHeaders());
-                } catch (IOException e) {
-                    responseCompletionHandler.failed(e);
-                }
-
-                CompletionHandler<HttpResponse> completionHandler = responseCompletionHandler;
-                responseCompletionHandler = null;
-
-                processReceivedHeaders(response);
-               // listener.onTaskCompleted(HttpConnection.this);
-
-                completionHandler.completed(response);
-                return false;
-            }
-
-            @Override
-            void processConnectionClosed() {
-                IOException closeException = new IOException("Connection closed by the server");
-
-                if (connectCompletionHandler != null) {
-                    connectCompletionHandler.failed(closeException);
-                } else if (responseCompletionHandler != null) {
-                    responseCompletionHandler.failed(closeException);
-                }
-
-                if (scheduledClose != null) {
-                    scheduledClose.cancel(true);
-                }
-                listener.onClose(HttpConnection.this);
-            }
-
-            @Override
-            void processError(Throwable t) {
-                if (connectCompletionHandler != null) {
-                    connectCompletionHandler.failed(t);
-                } else if (responseCompletionHandler != null) {
-                    responseCompletionHandler.failed(t);
-                }
-
-                HttpConnection.this.close();
-            }
-
-            @Override
-            void processConnect() {
-                downstreamFilter.startSsl();
-            }
-
-            @Override
-            void processSslHandshakeCompleted() {
-                connectCompletionHandler.completed(HttpConnection.this);
-                connectCompletionHandler = null;
-            }
-
-            @Override
-            void write(HttpRequest data, CompletionHandler<HttpRequest> completionHandler) {
-                downstreamFilter.write(data, completionHandler);
-            }
-        };
+        this.stateListener = stateListener;
+        filterChain = createFilterChain(uri, configuration);
     }
 
-    void execute(HttpRequest httpRequest, final CompletionHandler<HttpResponse> responseCompletionHandler) {
-        this.responseCompletionHandler = responseCompletionHandler;
-        this.requestUri = httpRequest.getUri();
-        if (scheduledClose != null) {
-            scheduledClose.cancel(true);
+    void connect() {
+        changeState(State.CONNECTING);
+        filterChain.connect(new InetSocketAddress(uri.getHost(), Utils.getPort(uri)), null);
+    }
+
+    void send(HttpRequest httpRequest) {
+        if (state != State.IDLE) {
+            throw new IllegalStateException("Http request cannot be sent over a connection that is in other state than IDLE. Current state: " + state);
         }
-        httpRequest.addHeaderIfNotPresent("Connection", "keep-alive");
-        Map<String, List<String>> cookies;
-        try {
-            cookies = cookieManager.get(requestUri, httpRequest.getHeaders());
-        } catch (IOException e) {
-            responseCompletionHandler.failed(e);
-            return;
-        }
-        httpRequest.getHeaders().putAll(cookies);
+
+        this.httpRequest = httpRequest;
+        // clean state left by previous request
+        httResponse = null;
+        error = null;
+        changeState(State.SENDING_REQUEST);
+
+        addHeaders();
 
         filterChain.write(httpRequest, new CompletionHandler<HttpRequest>() {
             @Override
             public void failed(Throwable throwable) {
+                error = throwable;
+                changeState(State.ERROR);
+            }
 
-                responseCompletionHandler.failed(throwable);
-                HttpConnection.this.close();
+            @Override
+            public void completed(HttpRequest result) {
+                changeState(State.RECEIVING_HEADER);
             }
         });
     }
 
-    void connect(URI uri, CompletionHandler<HttpConnection> completionHandler) {
-        filterChain.connect(new InetSocketAddress(uri.getHost(), Utils.getPort(uri)), null);
-        this.connectCompletionHandler = completionHandler;
-    }
-
-    void close() {
-        filterChain.close();
-        if (scheduledClose != null) {
-            scheduledClose.cancel(true);
-        }
-
-        listener.onClose(this);
-    }
-
-    EndpointKey getKey() {
-        return key;
-    }
-
-    private void processReceivedHeaders(HttpResponse response) {
-        List<String> connectionValues = response.removeHeader("Connection");
-
-        if (connectionValues == null) {
+    private void addHeaders() {
+        httpRequest.addHeaderIfNotPresent("Connection", "keep-alive");
+        Map<String, List<String>> cookies;
+        try {
+            cookies = cookieManager.get(httpRequest.getUri(), httpRequest.getHeaders());
+        } catch (IOException e) {
+            changeState(State.ERROR);
             return;
         }
-
-        for (String value : connectionValues) {
-            if ("close".equalsIgnoreCase(value)) {
-                close();
-                return;
-            }
-
-            //TODO Keep-Alive: timeout:60
-        }
-
+        httpRequest.getHeaders().putAll(cookies);
     }
 
-    private void scheduleTimeout() {
-        if (scheduledClose != null) {
-            scheduledClose.cancel(true);
-        }
-        scheduledClose = scheduler.schedule(new Runnable() {
+    private ConnectionFilter createFilterChain(URI uri, ConnectorConfiguration configuration) {
+        boolean secure = "https".equals(uri.getScheme());
+        Filter<ByteBuffer, ByteBuffer, ?, ?> socket;
+        if (secure) {
+            SSLContext sslContext = configuration.getSslContext();
+            TransportFilter transportFilter = new TransportFilter(SSL_INPUT_BUFFER_SIZE, configuration.getThreadPoolConfig(), configuration.getContainerIdleTimeout());
+            if (sslContext == null) {
+                sslContext = SslConfigurator.getDefaultContext();
 
-            @Override
-            public void run() {
-                close();
-                listener.onClose(HttpConnection.this);
             }
-        }, connectionTimeout, TimeUnit.SECONDS);
+            socket = new SslFilter(transportFilter, sslContext, uri.getHost(), configuration.getHostnameVerifier());
+        } else {
+            socket = new TransportFilter(INPUT_BUFFER_SIZE, configuration.getThreadPoolConfig(), configuration.getContainerIdleTimeout());
+        }
+
+        int maxHeaderSize = configuration.getMaxHeaderSize();
+        HttpFilter httpFilter = new HttpFilter(socket, maxHeaderSize, maxHeaderSize + INPUT_BUFFER_SIZE);
+        return new ConnectionFilter(httpFilter);
     }
 
-    static class EndpointKey {
-        private final String host;
-        private final int port;
-        private final boolean secure;
+    private class ConnectionFilter extends Filter<HttpRequest, HttpResponse, HttpRequest, HttpResponse> {
 
-        EndpointKey(URI uri) {
-            host = uri.getHost();
-            port = Utils.getPort(uri);
-            secure = "https".equalsIgnoreCase(uri.getScheme());
+        ConnectionFilter(Filter<HttpRequest, HttpResponse, ?, ?> downstreamFilter) {
+            super(downstreamFilter);
         }
 
         @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
+        boolean processRead(HttpResponse response) {
+            try {
+                cookieManager.put(httpRequest.getUri(), response.getHeaders());
+            } catch (IOException e) {
+                error = e;
+                changeState(State.ERROR);
+                return false;
+            }
 
-            EndpointKey that = (EndpointKey) o;
-
-            if (port != that.port) return false;
-            if (secure != that.secure) return false;
-            if (host != null ? !host.equals(that.host) : that.host != null) return false;
-
-            return true;
+            if (expectingBody()) {
+                changeState(State.RECEIVING_BODY);
+            } else {
+                changeState(State.IDLE);
+            }
+            return false;
         }
 
         @Override
-        public int hashCode() {
-            int result = host != null ? host.hashCode() : 0;
-            result = 31 * result + port;
-            result = 31 * result + (secure ? 1 : 0);
-            return result;
+        void processConnect() {
+            downstreamFilter.startSsl();
+        }
+
+        @Override
+        void processSslHandshakeCompleted() {
+            changeState(State.IDLE);
+        }
+
+        @Override
+        void processConnectionClosed() {
+            changeState(State.CLOSED);
+        }
+
+        @Override
+        void processError(Throwable t) {
+            error = t;
+            changeState(State.ERROR);
         }
     }
 
-    interface CloseListener {
+    private boolean expectingBody() {
+        // TODO
+        return true;
+    }
 
-        void onClose(HttpConnection connection);
+    private void changeState(State newState) {
+        State old = state;
+        state = newState;
+        stateListener.onStateChanged(old, newState);
+    }
+
+    public static int getSslInputBufferSize() {
+        return SSL_INPUT_BUFFER_SIZE;
+    }
+
+    State getState() {
+        return state;
+    }
+
+    Throwable getError() {
+        return error;
+    }
+
+    HttpResponse getHttResponse() {
+        return httResponse;
+    }
+
+    HttpRequest getHttpRequest() {
+        return httpRequest;
+    }
+
+    enum State {
+        CREATED,
+        CONNECTING,
+        IDLE,
+        SENDING_REQUEST,
+        RECEIVING_HEADER,
+        RECEIVING_BODY,
+        CLOSED,
+        ERROR
+    }
+
+    interface ConnectionStateListener {
+
+        void onStateChanged(State oldState, State newState);
     }
 }
