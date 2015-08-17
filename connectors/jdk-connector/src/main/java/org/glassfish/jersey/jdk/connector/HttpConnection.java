@@ -47,6 +47,9 @@ import java.net.URI;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import javax.net.ssl.SSLContext;
 
@@ -73,22 +76,35 @@ public class HttpConnection {
     private final Filter<HttpRequest, HttpResponse, HttpRequest, HttpResponse> filterChain;
     private final CookieManager cookieManager;
     private final URI uri;
-    private final ConnectionStateListener stateListener;
+    private final StateChangeListener stateListener;
+    private final ScheduledExecutorService scheduler;
+    private final ConnectorConfiguration configuration;
 
     private HttpRequest httpRequest;
     private HttpResponse httResponse;
     private Throwable error;
     private State state = State.CREATED;
 
-    public HttpConnection(URI uri, CookieManager cookieManager, ConnectorConfiguration configuration, ConnectionStateListener stateListener) {
+    private Future<?> responseTimeout;
+    private Future<?> idleTimeout;
+    private Future<?> connectTimeout;
+
+    public HttpConnection(URI uri, CookieManager cookieManager, ConnectorConfiguration configuration, ScheduledExecutorService scheduler, StateChangeListener stateListener) {
         this.uri = uri;
         this.cookieManager = cookieManager;
         this.stateListener = stateListener;
+        this.configuration = configuration;
+        this.scheduler = scheduler;
         filterChain = createFilterChain(uri, configuration);
     }
 
     void connect() {
+        if (state != State.CREATED) {
+            throw new IllegalStateException("Cannot try to establish connection if the connection is in other than CREATED state, current state: " + state);
+        }
+
         changeState(State.CONNECTING);
+        scheduleConnectTimeout();
         filterChain.connect(new InetSocketAddress(uri.getHost(), Utils.getPort(uri)), null);
     }
 
@@ -96,6 +112,8 @@ public class HttpConnection {
         if (state != State.IDLE) {
             throw new IllegalStateException("Http request cannot be sent over a connection that is in other state than IDLE. Current state: " + state);
         }
+
+        cancelIdleTimeout();
 
         this.httpRequest = httpRequest;
         // clean state left by previous request
@@ -108,15 +126,25 @@ public class HttpConnection {
         filterChain.write(httpRequest, new CompletionHandler<HttpRequest>() {
             @Override
             public void failed(Throwable throwable) {
-                error = throwable;
-                changeState(State.ERROR);
+                handleError(throwable);
             }
 
             @Override
             public void completed(HttpRequest result) {
+                scheduleResponseTimeout();
                 changeState(State.RECEIVING_HEADER);
             }
         });
+    }
+
+    void close() {
+        if (state == State.CLOSED) {
+            return;
+        }
+
+        cancelAllTimeouts();
+        filterChain.close();
+        changeState(State.CLOSED);
     }
 
     private void addHeaders() {
@@ -125,13 +153,13 @@ public class HttpConnection {
         try {
             cookies = cookieManager.get(httpRequest.getUri(), httpRequest.getHeaders());
         } catch (IOException e) {
-            changeState(State.ERROR);
+            handleError(e);
             return;
         }
         httpRequest.getHeaders().putAll(cookies);
     }
 
-    private ConnectionFilter createFilterChain(URI uri, ConnectorConfiguration configuration) {
+    protected Filter<HttpRequest, HttpResponse, HttpRequest, HttpResponse> createFilterChain(URI uri, ConnectorConfiguration configuration) {
         boolean secure = "https".equals(uri.getScheme());
         Filter<ByteBuffer, ByteBuffer, ?, ?> socket;
         if (secure) {
@@ -151,52 +179,6 @@ public class HttpConnection {
         return new ConnectionFilter(httpFilter);
     }
 
-    private class ConnectionFilter extends Filter<HttpRequest, HttpResponse, HttpRequest, HttpResponse> {
-
-        ConnectionFilter(Filter<HttpRequest, HttpResponse, ?, ?> downstreamFilter) {
-            super(downstreamFilter);
-        }
-
-        @Override
-        boolean processRead(HttpResponse response) {
-            try {
-                cookieManager.put(httpRequest.getUri(), response.getHeaders());
-            } catch (IOException e) {
-                error = e;
-                changeState(State.ERROR);
-                return false;
-            }
-
-            if (expectingBody()) {
-                changeState(State.RECEIVING_BODY);
-            } else {
-                changeState(State.IDLE);
-            }
-            return false;
-        }
-
-        @Override
-        void processConnect() {
-            downstreamFilter.startSsl();
-        }
-
-        @Override
-        void processSslHandshakeCompleted() {
-            changeState(State.IDLE);
-        }
-
-        @Override
-        void processConnectionClosed() {
-            changeState(State.CLOSED);
-        }
-
-        @Override
-        void processError(Throwable t) {
-            error = t;
-            changeState(State.ERROR);
-        }
-    }
-
     private boolean expectingBody() {
         // TODO
         return true;
@@ -205,15 +187,101 @@ public class HttpConnection {
     private void changeState(State newState) {
         State old = state;
         state = newState;
-        stateListener.onStateChanged(old, newState);
+        stateListener.onStateChanged(this, old, newState);
     }
 
-    public static int getSslInputBufferSize() {
-        return SSL_INPUT_BUFFER_SIZE;
+    private void scheduleResponseTimeout() {
+        if (configuration.getResponseTimeout() == 0) {
+            return;
+        }
+
+        responseTimeout = scheduler.schedule(new Runnable() {
+            @Override
+            public void run() {
+                if (state != State.RECEIVING_HEADER && state != State.RECEIVING_BODY) {
+                    return;
+                }
+
+                responseTimeout = null;
+                changeState(State.RESPONSE_TIMEOUT);
+
+            }
+        }, configuration.getResponseTimeout(), TimeUnit.MILLISECONDS);
     }
 
-    State getState() {
-        return state;
+    private void cancelResponseTimeout() {
+        if (responseTimeout != null) {
+            responseTimeout.cancel(true);
+            responseTimeout = null;
+        }
+    }
+
+    private void scheduleConnectTimeout() {
+        if (configuration.getConnectTimeout() == 0) {
+            return;
+        }
+
+        connectTimeout = scheduler.schedule(new Runnable() {
+            @Override
+            public void run() {
+                if (state != State.CONNECTING) {
+                    return;
+                }
+
+                connectTimeout = null;
+                changeState(State.CONNECT_TIMEOUT);
+            }
+        }, configuration.getConnectTimeout(), TimeUnit.MILLISECONDS);
+    }
+
+    private void cancelConnectTimeout() {
+        if (connectTimeout != null) {
+            connectTimeout.cancel(true);
+            connectTimeout = null;
+        }
+    }
+
+    private void scheduleIdleTimeout() {
+        if (configuration.getConnectionIdleTimeout() == 0) {
+            return;
+        }
+
+        idleTimeout = scheduler.schedule(new Runnable() {
+            @Override
+            public void run() {
+                if (state != State.IDLE) {
+                    return;
+                }
+
+                idleTimeout = null;
+                changeState(State.IDLE_TIMEOUT);
+            }
+        }, configuration.getConnectionIdleTimeout(), TimeUnit.MILLISECONDS);
+    }
+
+    private void cancelIdleTimeout() {
+        if (idleTimeout != null) {
+            idleTimeout.cancel(true);
+            idleTimeout = null;
+        }
+    }
+
+    private void cancelAllTimeouts() {
+        cancelConnectTimeout();
+        cancelIdleTimeout();
+        cancelResponseTimeout();
+    }
+
+    private void handleError(Throwable t) {
+        cancelConnectTimeout();
+        error = t;
+        changeState(State.ERROR);
+        changeState(State.CLOSED);
+    }
+
+    private void changeStateToIdle() {
+        scheduleIdleTimeout();
+        changeState(State.IDLE);
     }
 
     Throwable getError() {
@@ -228,19 +296,100 @@ public class HttpConnection {
         return httpRequest;
     }
 
+    private class ConnectionFilter extends Filter<HttpRequest, HttpResponse, HttpRequest, HttpResponse> {
+
+        ConnectionFilter(Filter<HttpRequest, HttpResponse, ?, ?> downstreamFilter) {
+            super(downstreamFilter);
+        }
+
+        @Override
+        boolean processRead(HttpResponse response) {
+            if (state != State.RECEIVING_HEADER) {
+                return false;
+            }
+
+            httResponse = response;
+
+            try {
+                cookieManager.put(httpRequest.getUri(), httResponse.getHeaders());
+            } catch (IOException e) {
+                handleError(e);
+                return false;
+            }
+
+            if (expectingBody()) {
+                AsynchronousBodyInputStream bodyStream = httResponse.getBodyStream();
+                bodyStream.setStateChangeLister(new AsynchronousBodyInputStream.StateChangeLister() {
+                    @Override
+                    public void onError(Throwable t) {
+                        handleError(t);
+                    }
+
+                    @Override
+                    public void onAllDataRead() {
+                        cancelResponseTimeout();
+                        changeStateToIdle();
+                    }
+                });
+                changeState(State.RECEIVING_BODY);
+            } else {
+                changeStateToIdle();
+            }
+            return false;
+        }
+
+        @Override
+        void processConnect() {
+            if (state != State.CONNECTING) {
+                return;
+            }
+            downstreamFilter.startSsl();
+        }
+
+        @Override
+        void processSslHandshakeCompleted() {
+            if (state != State.CONNECTING) {
+                return;
+            }
+
+            cancelConnectTimeout();
+            changeStateToIdle();
+        }
+
+        @Override
+        void processConnectionClosed() {
+            cancelAllTimeouts();
+            changeState(State.CLOSED_BY_SERVER);
+            changeState(State.CLOSED);
+        }
+
+        @Override
+        void processError(Throwable t) {
+            handleError(t);
+        }
+
+        @Override
+        void write(HttpRequest data, CompletionHandler<HttpRequest> completionHandler) {
+            downstreamFilter.write(data, completionHandler);
+        }
+    }
+
     enum State {
         CREATED,
         CONNECTING,
+        CONNECT_TIMEOUT,
         IDLE,
         SENDING_REQUEST,
         RECEIVING_HEADER,
         RECEIVING_BODY,
+        RESPONSE_TIMEOUT,
+        CLOSED_BY_SERVER,
         CLOSED,
-        ERROR
+        ERROR,
+        IDLE_TIMEOUT
     }
 
-    interface ConnectionStateListener {
-
-        void onStateChanged(State oldState, State newState);
+    interface StateChangeListener {
+        void onStateChanged(HttpConnection connection, State oldState, State newState);
     }
 }

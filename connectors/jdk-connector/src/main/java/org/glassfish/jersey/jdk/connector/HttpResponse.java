@@ -58,9 +58,6 @@ public class HttpResponse {
     private final Map<String, List<String>> headers = new HashMap<>();
     private final AsynchronousBodyInputStream bodyStream;
 
-    private volatile boolean bodyReceived;
-    private volatile BodyReceivedListener bodyReceivedListener = null;
-
 
     HttpResponse(String protocolVersion, int statusCode, String reasonPhrase) {
         this.protocolVersion = protocolVersion;
@@ -123,10 +120,5 @@ public class HttpResponse {
 
     AsynchronousBodyInputStream getBodyStream() {
         return bodyStream;
-    }
-
-    interface BodyReceivedListener {
-
-        void onReceived();
     }
 }

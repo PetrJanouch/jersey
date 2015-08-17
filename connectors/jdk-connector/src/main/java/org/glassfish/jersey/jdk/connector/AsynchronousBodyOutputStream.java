@@ -214,7 +214,6 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
     }
 
     void open(Filter<ByteBuffer, ?, ?, ?> downstreamFilter) {
-        closeListener.onOpened();
         this.downstreamFilter = downstreamFilter;
         initialLatch.countDown();
         ready = true;
@@ -297,8 +296,6 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
      * This is used to indicate that the body has been completely written.
      */
     interface Listener {
-
-        void onOpened();
 
         void onClosed();
     }

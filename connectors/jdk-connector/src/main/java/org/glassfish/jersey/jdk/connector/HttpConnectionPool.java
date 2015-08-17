@@ -66,9 +66,9 @@ class HttpConnectionPool {
     private final ConnectorConfiguration connectorConfiguration;
     private final CookieManager cookieManager;
 
-    private final Map<HttpConnectionOld.EndpointKey, Deque<HttpConnectionOld>> available = new ConcurrentHashMap<>();
-    private final Set<HttpConnectionOld> openConnections = Collections.newSetFromMap(new ConcurrentHashMap<HttpConnectionOld, Boolean>());
-    private final Deque<CompletionHandler<HttpConnectionOld>> pendingConnectionRequests = new LinkedList<>();
+//    private final Map<HttpConnectionOld.EndpointKey, Deque<HttpConnectionOld>> available = new ConcurrentHashMap<>();
+//    private final Set<HttpConnectionOld> openConnections = Collections.newSetFromMap(new ConcurrentHashMap<HttpConnectionOld, Boolean>());
+//    private final Deque<CompletionHandler<HttpConnectionOld>> pendingConnectionRequests = new LinkedList<>();
 
     HttpConnectionPool(ConnectorConfiguration connectorConfiguration, CookieManager cookieManager) {
         this.connectorConfiguration = connectorConfiguration;

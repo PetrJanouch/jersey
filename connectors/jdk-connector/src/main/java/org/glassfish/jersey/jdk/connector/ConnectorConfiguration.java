@@ -48,6 +48,7 @@ import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.SSLContext;
 import javax.ws.rs.client.Client;
 import javax.ws.rs.core.Configuration;
+
 import java.net.CookiePolicy;
 import java.util.Map;
 import java.util.logging.Level;
@@ -60,19 +61,21 @@ class ConnectorConfiguration {
 
     private static final Logger LOGGER = Logger.getLogger(ConnectorConfiguration.class.getName());
 
-    private final boolean          fixLengthStreaming;
-    private final int              chunkSize;
-    private final boolean          followRedirects;
-    private final int              maxRedirects;
+    private final boolean fixLengthStreaming;
+    private final int chunkSize;
+    private final boolean followRedirects;
+    private final int maxRedirects;
     private final ThreadPoolConfig threadPoolConfig;
-    private final int              containerIdleTimeout;
-    private final int              maxHeaderSize;
-    private final CookiePolicy     cookiePolicy;
-    private final int              maxConnectionsPerDestionation;
-    private final int              maxConnections;
-    private final int              connectionIdleTimeout;
+    private final Integer containerIdleTimeout;
+    private final int maxHeaderSize;
+    private final CookiePolicy cookiePolicy;
+    private final int maxConnectionsPerDestionation;
+    private final int maxConnections;
+    private final int connectionIdleTimeout;
     private final SSLContext sslContext;
     private final HostnameVerifier hostnameVerifier;
+    private final int responseTimeout;
+    private final int connectTimeout;
 
     ConnectorConfiguration(Client client, Configuration config) {
         final Map<String, Object> properties = config.getProperties();
@@ -115,6 +118,10 @@ class ConnectorConfiguration {
                 .getValue(properties, JdkConnectorProvider.CONNECTION_IDLE_TIMEOUT, JdkConnectorProvider
                         .DEFAULT_CONNECTION_IDLE_TIMEOUT, Integer.class);
 
+        responseTimeout = ClientProperties.getValue(properties, ClientProperties.READ_TIMEOUT, 0, Integer.class);
+
+        connectTimeout = ClientProperties.getValue(properties, ClientProperties.CONNECT_TIMEOUT, 0, Integer.class);
+
         if (client.getSslContext() == null) {
             sslContext = SslConfigurator.getDefaultContext();
         } else {
@@ -148,7 +155,7 @@ class ConnectorConfiguration {
         return threadPoolConfig;
     }
 
-    int getContainerIdleTimeout() {
+    Integer getContainerIdleTimeout() {
         return containerIdleTimeout;
     }
 
@@ -172,12 +179,24 @@ class ConnectorConfiguration {
         return connectionIdleTimeout;
     }
 
-    public SSLContext getSslContext() {
+    SSLContext getSslContext() {
         return sslContext;
     }
 
-    public HostnameVerifier getHostnameVerifier() {
+    HostnameVerifier getHostnameVerifier() {
         return hostnameVerifier;
+    }
+
+    boolean isFollowRedirects() {
+        return followRedirects;
+    }
+
+    int getResponseTimeout() {
+        return responseTimeout;
+    }
+
+    int getConnectTimeout() {
+        return connectTimeout;
     }
 
     @Override

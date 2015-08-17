@@ -62,6 +62,7 @@ public class AsynchronousBodyInputStream extends BodyInputStream {
     private Throwable t = null;
     private boolean closedForInput;
     private ExecutorService listenerExecutor = null;
+    private StateChangeLister stateChangeLister;
 
     private ByteBufferInputStream synchronousStream = null;
     private Queue<ByteBuffer> data = new LinkedList<>();
@@ -241,6 +242,10 @@ public class AsynchronousBodyInputStream extends BodyInputStream {
     synchronized void onError(Throwable t) {
         assertClosedForInput();
 
+        if (stateChangeLister != null) {
+            stateChangeLister.onError(t);
+        }
+
         closedForInput = true;
 
         if (mode == Mode.SYNCHRONOUS) {
@@ -259,6 +264,11 @@ public class AsynchronousBodyInputStream extends BodyInputStream {
 
     synchronized void onAllDataRead() {
         assertClosedForInput();
+
+        if (stateChangeLister != null) {
+            stateChangeLister.onAllDataRead();
+        }
+
         if (mode == Mode.SYNCHRONOUS) {
             synchronousStream.closeQueue();
             return;
@@ -376,9 +386,20 @@ public class AsynchronousBodyInputStream extends BodyInputStream {
         }
     }
 
+    void setStateChangeLister(StateChangeLister stateChangeLister) {
+        this.stateChangeLister = stateChangeLister;
+    }
+
     private enum Mode {
         SYNCHRONOUS,
         ASYNCHRONOUS,
         UNDECIDED
+    }
+
+    interface StateChangeLister {
+
+        void onError(Throwable t);
+
+        void onAllDataRead();
     }
 }
