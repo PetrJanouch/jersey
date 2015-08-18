@@ -80,14 +80,14 @@ public class HttpConnection {
     private final ScheduledExecutorService scheduler;
     private final ConnectorConfiguration configuration;
 
-    private HttpRequest httpRequest;
-    private HttpResponse httResponse;
-    private Throwable error;
-    private State state = State.CREATED;
+    private volatile HttpRequest httpRequest;
+    private volatile HttpResponse httResponse;
+    private volatile Throwable error;
+    private volatile State state = State.CREATED;
 
-    private Future<?> responseTimeout;
-    private Future<?> idleTimeout;
-    private Future<?> connectTimeout;
+    private volatile Future<?> responseTimeout;
+    private volatile Future<?> idleTimeout;
+    private volatile Future<?> connectTimeout;
 
     public HttpConnection(URI uri, CookieManager cookieManager, ConnectorConfiguration configuration, ScheduledExecutorService scheduler, StateChangeListener stateListener) {
         this.uri = uri;
@@ -204,7 +204,7 @@ public class HttpConnection {
 
                 responseTimeout = null;
                 changeState(State.RESPONSE_TIMEOUT);
-
+                close();
             }
         }, configuration.getResponseTimeout(), TimeUnit.MILLISECONDS);
     }
@@ -230,6 +230,7 @@ public class HttpConnection {
 
                 connectTimeout = null;
                 changeState(State.CONNECT_TIMEOUT);
+                close();
             }
         }, configuration.getConnectTimeout(), TimeUnit.MILLISECONDS);
     }
@@ -255,6 +256,7 @@ public class HttpConnection {
 
                 idleTimeout = null;
                 changeState(State.IDLE_TIMEOUT);
+                close();
             }
         }, configuration.getConnectionIdleTimeout(), TimeUnit.MILLISECONDS);
     }
@@ -276,7 +278,7 @@ public class HttpConnection {
         cancelConnectTimeout();
         error = t;
         changeState(State.ERROR);
-        changeState(State.CLOSED);
+        close();
     }
 
     private void changeStateToIdle() {
@@ -343,6 +345,7 @@ public class HttpConnection {
             if (state != State.CONNECTING) {
                 return;
             }
+
             downstreamFilter.startSsl();
         }
 
@@ -360,7 +363,7 @@ public class HttpConnection {
         void processConnectionClosed() {
             cancelAllTimeouts();
             changeState(State.CLOSED_BY_SERVER);
-            changeState(State.CLOSED);
+            HttpConnection.this.close();
         }
 
         @Override

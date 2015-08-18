@@ -42,38 +42,49 @@ package org.glassfish.jersey.jdk.connector;
 import org.glassfish.jersey.internal.util.collection.NonBlockingInputStream;
 
 /**
- * Created by petr on 08/08/15.
+ * An extension of {@link NonBlockingInputStream} that adds method that enable using the stream asynchronously.
+ * It is inspired by and works in a very similar way as Servlet asynchronous streams introduced in 3.1.
+ * <p/>
+ * The stream supports 2 modes SYNCHRONOUS and ASYNCHRONOUS.
+ * The stream is one of the following 3 states:
+ * <ul>
+ * <li>UNDECIDED</li>
+ * <li>SYNCHRONOUS</li>
+ * <li>ASYNCHRONOUS</li>
+ * </ul>
+ * UNDECIDED is an initial mode and it commits either to SYNCHRONOUS or ASYNCHRONOUS. Once it commits to one of these
+ * 2 modes it cannot change to the other. The mode it commits to is decided based on the first use.
+ * If {@link #setReadListener(ReadListener)} is invoked before any of read or tryRead methods, it commits to ASYNCHRONOUS
+ * mode and similarly if any of read or tryRead methods is invoked before {@link #setReadListener(ReadListener)},
+ * it commits to SYNCHRONOUS mode.
  */
 public abstract class BodyInputStream extends NonBlockingInputStream {
 
-  /**
-   * Returns true if data can be read without blocking else returns
-   * false.
-   *
-   * @return <code>true</code> if data can be obtained without blocking,
-   *  otherwise returns <code>false</code>.
-   *
-   * @since Servlet 3.1
-   */
-  public abstract boolean isReady();
+    /**
+     * Returns true if data can be read without blocking else returns
+     * false.
+     * <p/>
+     * If the stream is in asynchronous mode and the user attempts to read from it even though this method returns
+     * false, an {@link IllegalStateException} is thrown.
+     *
+     * @return <code>true</code> if data can be obtained without blocking,
+     * otherwise returns <code>false</code>.
+     */
+    public abstract boolean isReady();
 
-  /**
-   * Instructs the <code>ServletInputStream</code> to invoke the provided
-   * {@link ReadListener} when it is possible to read
-   *
-   * @param readListener the {@link ReadListener} that should be notified
-   *  when it's possible to read.
-   *
-   * @exception IllegalStateException if one of the following conditions is true
-   * <ul>
-   * <li>the associated request is neither upgraded nor the async started
-   * <li>setReadListener is called more than once within the scope of the same request.
-   * </ul>
-   *
-   * @throws NullPointerException if readListener is null
-   *
-   * @since Servlet 3.1
-
-   */
-  public abstract void setReadListener(ReadListener readListener);
+    /**
+     * Instructs the stream to invoke the provided {@link ReadListener} when it is possible to read.
+     * <p/>
+     * If the stream is in UNDECIDED state, invoking this method will commit the stream to ASYNCHRONOUS mode.
+     *
+     * @param readListener the {@link ReadListener} that should be notified
+     *                     when it's possible to read.
+     * @throws IllegalStateException if one of the following conditions is true
+     *                               <ul>
+     *                               <li>the associated request is in SYNCHRONOUS mode. <li/>
+     *                               <li>setReadListener is called more than once within the scope of the same request. <li/>
+     *                               </ul>
+     * @throws NullPointerException  if readListener is null
+     */
+    public abstract void setReadListener(ReadListener readListener);
 }

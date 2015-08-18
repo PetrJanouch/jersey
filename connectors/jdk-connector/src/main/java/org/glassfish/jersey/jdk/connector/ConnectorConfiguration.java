@@ -76,6 +76,7 @@ class ConnectorConfiguration {
     private final HostnameVerifier hostnameVerifier;
     private final int responseTimeout;
     private final int connectTimeout;
+    private final boolean strictMode;
 
     ConnectorConfiguration(Client client, Configuration config) {
         final Map<String, Object> properties = config.getProperties();
@@ -129,6 +130,8 @@ class ConnectorConfiguration {
         }
 
         hostnameVerifier = client.getHostnameVerifier();
+
+        strictMode = ClientProperties.getValue(properties, JdkConnectorProvider.STRICT_MODE, false, Boolean.class);
 
         if (LOGGER.isLoggable(Level.FINEST)) {
             LOGGER.log(Level.FINEST, "Connector configuration: " + toString());
@@ -197,6 +200,10 @@ class ConnectorConfiguration {
 
     int getConnectTimeout() {
         return connectTimeout;
+    }
+
+    boolean isStrictMode() {
+        return strictMode;
     }
 
     @Override

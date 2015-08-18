@@ -39,7 +39,6 @@
  */
 package org.glassfish.jersey.jdk.connector;
 
-import jersey.repackaged.com.google.common.util.concurrent.SettableFuture;
 import org.glassfish.jersey.client.ClientProperties;
 import org.glassfish.jersey.client.ClientRequest;
 import org.glassfish.jersey.client.ClientResponse;
@@ -62,6 +61,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Future;
 import java.util.logging.Logger;
+
+import jersey.repackaged.com.google.common.util.concurrent.SettableFuture;
 
 /**
  * @author Petr Janouch (petr.janouch at oracle.com)
@@ -118,7 +119,7 @@ class JdkConnector implements Connector {
         }
 
         final RedirectHandler redirectHandler = new RedirectHandler(httpConnectionPool, httpRequest, connectorConfiguration);
-        httpConnectionPool.execute(httpRequest, new CompletionHandler<HttpResponse>() {
+        httpConnectionPool.send(httpRequest, new CompletionHandler<HttpResponse>() {
 
             @Override
             public void failed(Throwable throwable) {

@@ -41,23 +41,23 @@
 package org.glassfish.jersey.jdk.connector;
 
 import java.net.CookieManager;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Created by petr on 16/01/15.
+ * Created by petr on 18/08/15.
  */
-class HttpConnectionPool {
+public class HttpConnectionPool {
 
     // TODO better solution, containers won't like this
     private static final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
         @Override
         public Thread newThread(Runnable r) {
             Thread thread = new Thread(r);
-            thread.setName("tyrus-jdk-container-idle-timeout");
             thread.setDaemon(true);
             return thread;
         }
@@ -65,120 +65,45 @@ class HttpConnectionPool {
 
     private final ConnectorConfiguration connectorConfiguration;
     private final CookieManager cookieManager;
-
-//    private final Map<HttpConnectionOld.EndpointKey, Deque<HttpConnectionOld>> available = new ConcurrentHashMap<>();
-//    private final Set<HttpConnectionOld> openConnections = Collections.newSetFromMap(new ConcurrentHashMap<HttpConnectionOld, Boolean>());
-//    private final Deque<CompletionHandler<HttpConnectionOld>> pendingConnectionRequests = new LinkedList<>();
+    private final Map<DestinationConnectionPool.DestinationKey, DestinationConnectionPool> destinationPools = new HashMap<>();
+    private final AtomicInteger totalConnectionCounter = new AtomicInteger(0);
 
     HttpConnectionPool(ConnectorConfiguration connectorConfiguration, CookieManager cookieManager) {
         this.connectorConfiguration = connectorConfiguration;
         this.cookieManager = cookieManager;
     }
 
-    void execute(final HttpRequest request, final CompletionHandler<HttpResponse> completionHandler) {
-//        obtainConnection(request, new CompletionHandler<HttpConnection>() {
-//            @Override
-//            public void failed(Throwable throwable) {
-//                completionHandler.failed(throwable);
-//            }
-//
-//            @Override
-//            public void completed(HttpConnection connection) {
-//                connection.execute(request, new CompletionHandler<HttpResponse>() {
-//                    @Override
-//                    public void failed(Throwable throwable) {
-//                        completionHandler.failed(throwable);
-//                    }
-//
-//                    @Override
-//                    public void completed(HttpResponse result) {
-//                        completionHandler.completed(result);
-//                    }
-//                });
-//            }
-//        });
+    void send(HttpRequest httpRequest, CompletionHandler<HttpResponse> completionHandler) {
+        DestinationConnectionPool destinationConnectionPool;
+        synchronized (this) {
+            final DestinationConnectionPool.DestinationKey destinationKey = new DestinationConnectionPool.DestinationKey(httpRequest.getUri());
+            destinationConnectionPool = destinationPools.get(destinationKey);
+
+
+            if (destinationConnectionPool == null) {
+                destinationConnectionPool = new DestinationConnectionPool(totalConnectionCounter, connectorConfiguration, cookieManager, scheduler, new DestinationConnectionPool.ConnectionCloseListener() {
+                    @Override
+                    public void onConnectionClosed() {
+                    /* TODO this is a preparation if we decide to support max connections; A pool starved on connections
+                    can be notified that the amount of open connections has decreased in this callback */
+                    }
+
+                    @Override
+                    public void onLastConnectionClosed() {
+                        destinationPools.remove(destinationKey);
+                    }
+                });
+            }
+        }
+
+        destinationConnectionPool.send(httpRequest, completionHandler);
     }
 
-//    private synchronized void obtainConnection(final HttpRequest request, CompletionHandler<HttpConnection> completionHandler) {
-//        HttpConnection.EndpointKey key = new HttpConnection.EndpointKey(request.getUri());
-//        Queue<HttpConnection> httpConnections = available.get(key);
-//        if (httpConnections == null || httpConnections.isEmpty()) {
-//            if (canCreateConnection(key)) {
-//                createConnection(request.getUri(), completionHandler);
-//            } else {
-//                pendingConnectionRequests.add(completionHandler);
-//            }
-//
-//        } else {
-//            HttpConnection connection = httpConnections.poll();
-//            removeFromPool(connection);
-//            completionHandler.completed(connection);
-//        }
-//    }
-//
-//    private synchronized void releaseConnection(HttpConnection connection) {
-//        Deque<HttpConnection> httpConnections = available.get(connection.getKey());
-//        if (httpConnections == null) {
-//            httpConnections = new LinkedList<>();
-//            available.put(connection.getKey(), httpConnections);
-//        }
-//
-//        httpConnections.addFirst(connection);
-//       // pendingConnectionRequests
-//    }
-//
-//    void shutDown() {
-//        for (HttpConnection connection : openConnections) {
-//            connection.close();
-//        }
-//    }
-//
-//    private void createConnection(URI uri, final CompletionHandler<HttpConnection> completionHandler) {
-//        final HttpConnection connection = new HttpConnection(uri, sslContext, hostnameVerifier, maxHeaderSize, threadPoolConfig, containerIdleTimeout, connectionTimeout, scheduler, cookieManager, new HttpConnection.CloseListener() {
-//
-//            @Override
-//            public void onClose(HttpConnection connection) {
-//                openConnections.remove(connection);
-//                removeFromPool(connection);
-//            }
-//        });
-//
-//        connection.connect(uri, new CompletionHandler<HttpConnection>() {
-//            @Override
-//            public void failed(Throwable throwable) {
-//                completionHandler.failed(throwable);
-//            }
-//
-//            @Override
-//            public void completed(HttpConnection result) {
-//                openConnections.add(connection);
-//                completionHandler.completed(result);
-//            }
-//        });
-//
-//    }
-//
-//    private void removeFromPool(HttpConnection connection) {
-//        Queue<HttpConnection> httpConnections = available.get(connection.getKey());
-//        if (httpConnections != null) {
-//            httpConnections.remove(connection);
-//        }
-//    }
-//
-//    private boolean canCreateConnection(HttpConnection.EndpointKey key) {
-//        if (openConnections.size() >= maxOpenTotal) {
-//            return false;
-//        }
-//
-//        Queue<HttpConnection> httpConnections = available.get(key);
-//        if (httpConnections == null) {
-//            return true;
-//        }
-//
-//        if (httpConnections.size() < maxOpenPerDestination) {
-//            return true;
-//        }
-//
-//        return false;
-//    }
+    synchronized void close() {
+        for (DestinationConnectionPool destinationPool : destinationPools.values()) {
+            destinationPool.close();
+        }
+
+        scheduler.shutdownNow();
+    }
 }

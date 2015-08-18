@@ -43,7 +43,7 @@ package org.glassfish.jersey.jdk.connector;
 import java.io.OutputStream;
 
 /**
- * Created by petr on 06/07/15.
+ *
  */
 public abstract class BodyOutputStream extends OutputStream {
     /**

@@ -72,6 +72,8 @@ public class JdkConnectorProvider implements ConnectorProvider {
 
     public static final String CONNECTION_IDLE_TIMEOUT = "jersey.config.client.JdkConnectorProvider.connectionIdleTimeout";
 
+    static final String STRICT_MODE = "jersey.config.client.JdkConnectorProvider.strictMode";
+
     /**
      * Default chunk size in HTTP chunk-encoded messages.
      */

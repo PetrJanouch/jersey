@@ -46,17 +46,6 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 
-/**
- * Abstract body output stream that supports both synchronous and asynchronous operations.
- * <p/>
- * By default the stream works like a normal {@link OutputStream} with blocking {@link #write}, but it can switch into
- * asynchronous mode by registering {@link WriteListener} using {@link #setWriteListener(WriteListener)}. Once {@link
- * WriteListener} has been registered, the stream switches into asynchronous mode and any attempt to invoke {@link #write}
- * operation when the stream is not ready to accept more data ({@link #isReady()} returns false) results in an exception.
- * <p/>
- * The asynchronous mode is inspired by servlet 3.1 with analogy in operations {@link #setWriteListener(WriteListener)}, {@link
- * #isReady()} and write callback {@link WriteListener}.
- */
 abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
 
     private volatile Filter<ByteBuffer, ?, ?, ?> downstreamFilter;

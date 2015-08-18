@@ -51,15 +51,15 @@ import java.util.logging.Logger;
  */
 class RedirectHandler {
 
-    private static final Logger       LOGGER                = Logger.getLogger(RedirectHandler.class.getName());
+    private static final Logger LOGGER = Logger.getLogger(RedirectHandler.class.getName());
     private static final Set<Integer> REDIRECT_STATUS_CODES = Collections
             .unmodifiableSet(new HashSet<>(Arrays.asList(300, 301, 302, 303, 307, 308)));
 
-    private final int                maxRedirects;
-    private final boolean            followRedirects;
-    private final Set<URI>           redirectUriHistory;
+    private final int maxRedirects;
+    private final boolean followRedirects;
+    private final Set<URI> redirectUriHistory;
     private final HttpConnectionPool httpConnectionPool;
-    private final HttpRequest        originalHttpRequest;
+    private final HttpRequest originalHttpRequest;
 
     private volatile URI lastRequestUri = null;
 
@@ -137,7 +137,7 @@ class RedirectHandler {
         final HttpRequest httpRequest = HttpRequest.createBodyless(originalHttpRequest.getMethod(), location, originalHttpRequest.getHeaders());
         lastRequestUri = location;
 
-        httpConnectionPool.execute(httpRequest, completionHandler);
+        httpConnectionPool.send(httpRequest, completionHandler);
     }
 
     URI getLastRequestUri() {
