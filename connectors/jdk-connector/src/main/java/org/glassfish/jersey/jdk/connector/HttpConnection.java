@@ -340,6 +340,7 @@ public class HttpConnection {
                     @Override
                     public void onAllDataRead() {
                         cancelResponseTimeout();
+                        changeState(State.RECEIVED);
                         if (persistentConnection) {
                             changeStateToIdle();
                         } else {
@@ -350,6 +351,7 @@ public class HttpConnection {
 
             } else {
                 cancelResponseTimeout();
+                changeState(State.RECEIVED);
                 if (persistentConnection) {
                     changeStateToIdle();
                 } else {
@@ -404,6 +406,7 @@ public class HttpConnection {
         SENDING_REQUEST,
         RECEIVING_HEADER,
         RECEIVING_BODY,
+        RECEIVED,
         RESPONSE_TIMEOUT,
         CLOSED_BY_SERVER,
         CLOSED,

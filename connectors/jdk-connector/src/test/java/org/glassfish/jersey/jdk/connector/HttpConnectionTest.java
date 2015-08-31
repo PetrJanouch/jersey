@@ -71,6 +71,7 @@ import static org.glassfish.jersey.jdk.connector.HttpConnection.State.CONNECT_TI
 import static org.glassfish.jersey.jdk.connector.HttpConnection.State.ERROR;
 import static org.glassfish.jersey.jdk.connector.HttpConnection.State.IDLE;
 import static org.glassfish.jersey.jdk.connector.HttpConnection.State.IDLE_TIMEOUT;
+import static org.glassfish.jersey.jdk.connector.HttpConnection.State.RECEIVED;
 import static org.glassfish.jersey.jdk.connector.HttpConnection.State.RECEIVING_BODY;
 import static org.glassfish.jersey.jdk.connector.HttpConnection.State.RECEIVING_HEADER;
 import static org.glassfish.jersey.jdk.connector.HttpConnection.State.RESPONSE_TIMEOUT;
@@ -93,14 +94,14 @@ public class HttpConnectionTest extends JerseyTest {
 
     @Test
     public void testBasic() {
-        HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, IDLE, SENDING_REQUEST, RECEIVING_HEADER, RECEIVING_BODY, IDLE};
+        HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, IDLE, SENDING_REQUEST, RECEIVING_HEADER, RECEIVING_BODY, RECEIVED, IDLE};
         HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri(), new HashMap<String, List<String>>());
         doTest(ERROR_STATE.NONE, expectedStates, request);
     }
 
     @Test
     public void testMultipleRequests() {
-        HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, IDLE, SENDING_REQUEST, RECEIVING_HEADER, RECEIVING_BODY, IDLE, SENDING_REQUEST, RECEIVING_HEADER, RECEIVING_BODY, IDLE};
+        HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, IDLE, SENDING_REQUEST, RECEIVING_HEADER, RECEIVING_BODY, RECEIVED, IDLE, SENDING_REQUEST, RECEIVING_HEADER, RECEIVING_BODY, RECEIVED, IDLE};
         HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri(), new HashMap<String, List<String>>());
         doTest(ERROR_STATE.NONE, expectedStates, request, request);
     }
@@ -149,7 +150,7 @@ public class HttpConnectionTest extends JerseyTest {
 
     @Test
     public void testIdleTimeout() {
-        HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, IDLE, SENDING_REQUEST, RECEIVING_HEADER, RECEIVING_BODY, IDLE, IDLE_TIMEOUT, CLOSED};
+        HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, IDLE, SENDING_REQUEST, RECEIVING_HEADER, RECEIVING_BODY, RECEIVED, IDLE, IDLE_TIMEOUT, CLOSED};
         HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri(), new HashMap<String, List<String>>());
         ConnectorConfiguration configuration = new ConnectorConfiguration(client(), client().getConfiguration()) {
 

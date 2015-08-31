@@ -157,6 +157,11 @@ public class DestinationConnectionPool {
         connectionCounter.decrementAndGet();
         totalConnectionCounter.decrementAndGet();
 
+        RequestRecord pendingRequest = pendingRequests.poll();
+        if (pendingRequest != null) {
+            send(pendingRequest.request, pendingRequest.completionHandler);
+        }
+
         if (connectionCounter.get() == 0) {
             connectionCloseListener.onLastConnectionClosed();
         }
@@ -175,19 +180,7 @@ public class DestinationConnectionPool {
 
                 case IDLE: {
                     switch (oldState) {
-                        case RECEIVING_HEADER: {
-                            RequestRecord request = removeRequest(connection);
-                            request.completionHandler.completed(connection.getHttResponse());
-                            handleIdleConnection(connection);
-                            return;
-                        }
-
-                        case RECEIVING_BODY: {
-                            removeRequest(connection);
-                            handleIdleConnection(connection);
-                            return;
-                        }
-
+                        case RECEIVED:
                         case CONNECTING: {
                             handleIdleConnection(connection);
                             return;
@@ -195,6 +188,27 @@ public class DestinationConnectionPool {
 
                         default: {
                             handleIllegalStateTransition(oldState, newState);
+                            return;
+                        }
+                    }
+                }
+
+                case RECEIVED: {
+                    switch (oldState) {
+                        case RECEIVING_HEADER: {
+                            RequestRecord request = removeRequest(connection);
+                            request.completionHandler.completed(connection.getHttResponse());
+                            return;
+                        }
+
+                        case RECEIVING_BODY: {
+                            removeRequest(connection);
+                            return;
+                        }
+
+                        default: {
+                            handleIllegalStateTransition(oldState, newState);
+                            return;
                         }
                     }
                 }
@@ -210,6 +224,7 @@ public class DestinationConnectionPool {
 
                         default: {
                             handleIllegalStateTransition(oldState, newState);
+                            return;
                         }
                     }
                 }
@@ -243,6 +258,7 @@ public class DestinationConnectionPool {
                         default: {
                             connection.getError().printStackTrace();
                             handleIllegalStateTransition(oldState, newState);
+                            return;
                         }
                     }
                 }
@@ -264,6 +280,7 @@ public class DestinationConnectionPool {
 
                         default: {
                             handleIllegalStateTransition(oldState, newState);
+                            return;
                         }
                     }
                 }
@@ -293,6 +310,8 @@ public class DestinationConnectionPool {
                             for (RequestRecord requestRecord : pendingRequests) {
                                 requestRecord.completionHandler.failed(new IOException("Connection closed by server"));
                             }
+
+                            return;
                         }
                     }
                 }
@@ -322,6 +341,7 @@ public class DestinationConnectionPool {
 
                         default: {
                             cleanClosedConnection(connection);
+                            return;
                         }
                     }
                 }
@@ -338,6 +358,7 @@ public class DestinationConnectionPool {
 
                         default: {
                             cleanClosedConnection(connection);
+                            return;
                         }
                     }
                 }
