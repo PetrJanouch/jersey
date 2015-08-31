@@ -43,16 +43,49 @@ package org.glassfish.jersey.jdk.connector;
 import java.io.OutputStream;
 
 /**
- *
+ * An extension of {@link OutputStream} that adds method that allow to use the stream asynchronously.
+ * It is inspired by and works in a very similar way as Servlet asynchronous streams introduced in 3.1.
+ * <p/>
+ * The stream supports 2 modes SYNCHRONOUS and ASYNCHRONOUS.
+ * The stream is one of the following 3 states:
+ * <ul>
+ * <li>UNDECIDED</li>
+ * <li>SYNCHRONOUS</li>
+ * <li>ASYNCHRONOUS</li>
+ * </ul>
+ * UNDECIDED is an initial mode and it commits either to SYNCHRONOUS or ASYNCHRONOUS. Once it commits to one of these
+ * 2 modes it cannot change to the other. The mode it commits to is decided based on the first use.
+ * If {@link #setWriteListener(WriteListener)} is invoked before any of the write methods, it commits to ASYNCHRONOUS
+ * mode and similarly if any of the write methods is invoked before {@link #setWriteListener(WriteListener)},
+ * it commits to SYNCHRONOUS mode.
  */
 public abstract class BodyOutputStream extends OutputStream {
+
     /**
-     * By setting this, this stream is switched into asynchronous mode. After this any call to {@link #write} that would result
-     * in blocking throws an exception.
+     * Instructs the stream to invoke the provided {@link WriteListener} when it is possible to write.
+     * <p/>
+     * If the stream is in UNDECIDED state, invoking this method will commit the stream to ASYNCHRONOUS mode.
      *
-     * @param writeListener write listener.
+     * @param writeListener the {@link WriteListener} that should be notified
+     *                      when it's possible to write.
+     * @throws IllegalStateException if one of the following conditions is true
+     *                               <ul>
+     *                               <li>the associated request is in SYNCHRONOUS mode. <li/>
+     *                               <li>setWriteListener is called more than once within the scope of the same request. <li/>
+     *                               </ul>
+     * @throws NullPointerException  if writeListener is null
      */
     public abstract void setWriteListener(WriteListener writeListener);
 
+    /**
+     * Returns true if data can be written without blocking else returns
+     * false.
+     * <p/>
+     * If the stream is in ASYNCHRONOUS mode and the user attempts to write to it even though this method returns
+     * false, an {@link IllegalStateException} is thrown.
+     *
+     * @return <code>true</code> if data can be obtained without blocking,
+     * otherwise returns <code>false</code>.
+     */
     public abstract boolean isReady();
 }

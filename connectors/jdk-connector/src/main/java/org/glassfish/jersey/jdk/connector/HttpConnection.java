@@ -84,6 +84,7 @@ public class HttpConnection {
     private volatile HttpResponse httResponse;
     private volatile Throwable error;
     private volatile State state = State.CREATED;
+    private volatile boolean persistentConnection = true;
 
     private volatile Future<?> responseTimeout;
     private volatile Future<?> idleTimeout;
@@ -119,9 +120,10 @@ public class HttpConnection {
         // clean state left by previous request
         httResponse = null;
         error = null;
+        persistentConnection = true;
         changeState(State.SENDING_REQUEST);
 
-        addHeaders();
+        addRequestHeaders();
 
         filterChain.write(httpRequest, new CompletionHandler<HttpRequest>() {
             @Override
@@ -147,8 +149,7 @@ public class HttpConnection {
         changeState(State.CLOSED);
     }
 
-    private void addHeaders() {
-        httpRequest.addHeaderIfNotPresent("Connection", "keep-alive");
+    private void addRequestHeaders() {
         Map<String, List<String>> cookies;
         try {
             cookies = cookieManager.get(httpRequest.getUri(), httpRequest.getHeaders());
@@ -157,6 +158,22 @@ public class HttpConnection {
             return;
         }
         httpRequest.getHeaders().putAll(cookies);
+    }
+
+    private void processResponseHeaders(HttpResponse response) throws IOException {
+        cookieManager.put(httpRequest.getUri(), httResponse.getHeaders());
+        response.removeHeader("Set-Cookie");
+        response.removeHeader("Set-Cookie2");
+
+        List<String> connectionValues = response.removeHeader("Connection");
+        if (connectionValues != null) {
+            for (String connectionValue : connectionValues) {
+                if (connectionValue.equalsIgnoreCase("Close")) {
+                    persistentConnection = false;
+                }
+            }
+        }
+
     }
 
     protected Filter<HttpRequest, HttpResponse, HttpRequest, HttpResponse> createFilterChain(URI uri, ConnectorConfiguration configuration) {
@@ -179,14 +196,10 @@ public class HttpConnection {
         return new ConnectionFilter(httpFilter);
     }
 
-    private boolean expectingBody() {
-        // TODO
-        return true;
-    }
-
     private void changeState(State newState) {
         State old = state;
         state = newState;
+        System.out.println(old + " -> " + newState);
         stateListener.onStateChanged(this, old, newState);
     }
 
@@ -294,10 +307,6 @@ public class HttpConnection {
         return httResponse;
     }
 
-    HttpRequest getHttpRequest() {
-        return httpRequest;
-    }
-
     private class ConnectionFilter extends Filter<HttpRequest, HttpResponse, HttpRequest, HttpResponse> {
 
         ConnectionFilter(Filter<HttpRequest, HttpResponse, ?, ?> downstreamFilter) {
@@ -313,14 +322,15 @@ public class HttpConnection {
             httResponse = response;
 
             try {
-                cookieManager.put(httpRequest.getUri(), httResponse.getHeaders());
+                processResponseHeaders(response);
             } catch (IOException e) {
                 handleError(e);
                 return false;
             }
 
-            if (expectingBody()) {
+            if (response.getHasContent()) {
                 AsynchronousBodyInputStream bodyStream = httResponse.getBodyStream();
+                changeState(State.RECEIVING_BODY);
                 bodyStream.setStateChangeLister(new AsynchronousBodyInputStream.StateChangeLister() {
                     @Override
                     public void onError(Throwable t) {
@@ -330,12 +340,21 @@ public class HttpConnection {
                     @Override
                     public void onAllDataRead() {
                         cancelResponseTimeout();
-                        changeStateToIdle();
+                        if (persistentConnection) {
+                            changeStateToIdle();
+                        } else {
+                            changeState(State.CLOSED);
+                        }
                     }
                 });
-                changeState(State.RECEIVING_BODY);
+
             } else {
-                changeStateToIdle();
+                cancelResponseTimeout();
+                if (persistentConnection) {
+                    changeStateToIdle();
+                } else {
+                    changeState(State.CLOSED);
+                }
             }
             return false;
         }

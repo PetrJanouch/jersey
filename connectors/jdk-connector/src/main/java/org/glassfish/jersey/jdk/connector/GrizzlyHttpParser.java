@@ -113,6 +113,7 @@ class GrizzlyHttpParser {
             return;
         }
 
+        httpResponse.setHasContent(expectContent);
         if (expectContent) {
             if (transferEncodingParser.parse(input)) {
                 complete = true;
@@ -475,10 +476,19 @@ class GrizzlyHttpParser {
         if (contentLengths != null) {
             try {
                 int bodyLength = Integer.parseInt(contentLengths.get(0));
+                if (bodyLength == 0) {
+                    expectContent = false;
+                    return;
+                }
+
+                if (bodyLength <= 0) {
+                    throw new ParseException("Content length cannot be less than 0");
+                }
+
                 transferEncodingParser = GrizzlyTransferEncodingParser.createFixedLengthParser(httpResponse.getBodyStream(), bodyLength);
 
             } catch (NumberFormatException e) {
-                throw new ParseException("Invalid format of status code");
+                throw new ParseException("Invalid format of content length code");
             }
 
             return;
@@ -574,7 +584,7 @@ class GrizzlyHttpParser {
         try {
             return new String(bytes, ENCODING);
         } catch (UnsupportedEncodingException e) {
-            throw new ParseException("Unsuported encoding: " + ENCODING, e);
+            throw new ParseException("Unsupported encoding: " + ENCODING, e);
         }
 
     }

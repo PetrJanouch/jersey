@@ -64,43 +64,45 @@ class HttpRequest {
     private final Map<String, List<String>> headers;
     private final BodyMode bodyMode;
     private final BodyOutputStream bodyStream;
+    private final int bodySize;
 
 
     private HttpRequest(String method, URI uri, Map<String, List<String>> headers, BodyMode bodyMode, BodyOutputStream
-            bodyStream) {
+            bodyStream, int bodySize) {
         this.method = method;
         this.uri = uri;
         this.headers = headers;
         this.bodyMode =bodyMode;
         this.bodyStream = bodyStream;
+        this.bodySize = bodySize;
 
         int port = Utils.getPort(uri);
         addHeaderIfNotPresent(HOST_HEADER, uri.getHost() + ":" + port);
     }
 
     static HttpRequest createBodyless(String method, URI uri, Map<String, List<String>> headers) {
-        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.NONE, null);
+        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.NONE, null, -1);
         httpRequest.addHeaderIfNotPresent(HttpHeaders.CONTENT_LENGTH, Integer.toString(0));
         return httpRequest;
     }
 
     static HttpRequest createStreamed(String method, URI uri, Map<String, List<String>> headers, int bodySize) {
         StreamedBodyOutputStream bodyStream = new StreamedBodyOutputStream(100, bodySize);
-        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.STREAMING, bodyStream);
+        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.STREAMING, bodyStream, bodySize);
         httpRequest.addHeaderIfNotPresent(HttpHeaders.CONTENT_LENGTH, Integer.toString(bodySize));
         return httpRequest;
     }
 
     static HttpRequest createChunked(String method, URI uri, Map<String, List<String>> headers, int chunkSize) {
         ChunkedBodyOutputStream bodyStream = new ChunkedBodyOutputStream(chunkSize);
-        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.CHUNKED, bodyStream);
+        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.CHUNKED, bodyStream, -1);
         httpRequest.addHeaderIfNotPresent(TRANSFER_ENCODING_HEADER, TRANSFER_ENCODING_CHUNKED);
         return httpRequest;
     }
 
     static HttpRequest createBuffered(String method, URI uri, Map<String, List<String>> headers) {
         BufferedBodyOutputStream bodyOutputStream = new BufferedBodyOutputStream();
-        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.BUFFERED, bodyOutputStream);
+        HttpRequest httpRequest = new HttpRequest(method, uri, headers, BodyMode.BUFFERED, bodyOutputStream, -1);
         return httpRequest;
     }
 
@@ -143,6 +145,18 @@ class HttpRequest {
         }
 
         return ((BufferedBodyOutputStream) bodyStream).toBuffer();
+    }
+
+    int getBodySize() {
+        if (bodyMode == BodyMode.CHUNKED) {
+            throw new IllegalStateException("Body size is not available in chunked body mode");
+        }
+
+        if (BodyMode.STREAMING == bodyMode) {
+            return bodySize;
+        }
+
+        return ((BufferedBodyOutputStream) bodyStream).toBuffer().remaining();
     }
 
     enum BodyMode {

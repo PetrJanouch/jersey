@@ -45,6 +45,7 @@ import org.glassfish.jersey.client.spi.ConnectorProvider;
 
 import javax.ws.rs.client.Client;
 import javax.ws.rs.core.Configuration;
+
 import java.net.CookiePolicy;
 
 /**
@@ -64,10 +65,10 @@ public class JdkConnectorProvider implements ConnectorProvider {
 
     public static final String COOKIE_POLICY = "jersey.config.client.JdkConnectorProvider.cookiePolicy";
 
-    public static final String MAX_CONECTIONS_PER_DESTINATION = "jersey.config.client.JdkConnectorProvider" +
+    public static final String MAX_CONNECTIONS_PER_DESTINATION = "jersey.config.client.JdkConnectorProvider" +
             ".maxConnectionsPerDestination";
 
-    public static final String MAX_CONECTIONS = "jersey.config.client.JdkConnectorProvider" +
+    public static final String MAX_CONNECTIONS = "jersey.config.client.JdkConnectorProvider" +
             ".maxConnections";
 
     public static final String CONNECTION_IDLE_TIMEOUT = "jersey.config.client.JdkConnectorProvider.connectionIdleTimeout";
@@ -79,18 +80,16 @@ public class JdkConnectorProvider implements ConnectorProvider {
      */
     public static final int DEFAULT_HTTP_CHUNK_SIZE = 4096;
 
-    public  static final int          DEFAULT_MAX_HEADER_SIZE = 1000;
-    public  static final int          DEFAULT_MAX_REDIRECTS   = 5;
-    public  static final CookiePolicy DEFAULT_COOKIE_POLICY   = CookiePolicy.ACCEPT_ORIGINAL_SERVER;
-    public  static final boolean DEFAULT_USE_FIXED_LENGTH_STREAMING = false;
-    public  static final int DEFAULT_MAX_CONECTIONS_PER_DESTINATION = 20;
-    public  static final int DEFAULT_MAX_CONECTIONS = 100;
-    public  static final int DEFAULT_CONNECTION_IDLE_TIMEOUT = 30;
+    public static final int DEFAULT_MAX_HEADER_SIZE = 1000;
+    public static final int DEFAULT_MAX_REDIRECTS = 5;
+    public static final CookiePolicy DEFAULT_COOKIE_POLICY = CookiePolicy.ACCEPT_ORIGINAL_SERVER;
+    public static final boolean DEFAULT_USE_FIXED_LENGTH_STREAMING = false;
+    public static final int DEFAULT_MAX_CONNECTIONS_PER_DESTINATION = 20;
+    public static final int DEFAULT_MAX_CONNECTIONS = 100;
+    public static final int DEFAULT_CONNECTION_IDLE_TIMEOUT = 1000;
 
     @Override
     public Connector getConnector(Client client, Configuration config) {
-
-
         return new JdkConnector(client, config);
     }
 }

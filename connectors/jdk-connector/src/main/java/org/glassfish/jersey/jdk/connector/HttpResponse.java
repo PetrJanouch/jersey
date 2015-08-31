@@ -40,8 +40,6 @@
 
 package org.glassfish.jersey.jdk.connector;
 
-import org.glassfish.jersey.internal.util.collection.ByteBufferInputStream;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -57,7 +55,7 @@ public class HttpResponse {
     private final String reasonPhrase;
     private final Map<String, List<String>> headers = new HashMap<>();
     private final AsynchronousBodyInputStream bodyStream;
-
+    private volatile boolean hasContent = true;
 
     HttpResponse(String protocolVersion, int statusCode, String reasonPhrase) {
         this.protocolVersion = protocolVersion;
@@ -66,19 +64,27 @@ public class HttpResponse {
         bodyStream = new AsynchronousBodyInputStream();
     }
 
-    public String getProtocolVersion() {
+    String getProtocolVersion() {
         return protocolVersion;
     }
 
-    public int getStatusCode() {
+    int getStatusCode() {
         return statusCode;
     }
 
-    public String getReasonPhrase() {
+    String getReasonPhrase() {
         return reasonPhrase;
     }
 
-    public Map<String, List<String>> getHeaders() {
+    void setHasContent(boolean hasContent) {
+        this.hasContent = hasContent;
+    }
+
+    boolean getHasContent() {
+        return hasContent;
+    }
+
+    Map<String, List<String>> getHeaders() {
         return headers;
     }
 

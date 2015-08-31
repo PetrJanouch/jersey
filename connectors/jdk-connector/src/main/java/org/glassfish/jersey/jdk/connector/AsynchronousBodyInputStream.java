@@ -42,6 +42,7 @@ package org.glassfish.jersey.jdk.connector;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Deque;
 import java.util.LinkedList;
 import java.util.Queue;
 import java.util.concurrent.ExecutorService;
@@ -60,12 +61,12 @@ public class AsynchronousBodyInputStream extends BodyInputStream {
     private ReadListener readListener = null;
     private boolean callReadListener = false;
     private Throwable t = null;
-    private boolean closedForInput;
+    private boolean closedForInput = false;
     private ExecutorService listenerExecutor = null;
     private StateChangeLister stateChangeLister;
 
     private ByteBufferInputStream synchronousStream = null;
-    private Queue<ByteBuffer> data = new LinkedList<>();
+    private Deque<ByteBuffer> data = new LinkedList<>();
 
     public void setListenerExecutor(ExecutorService listenerExecutor) {
         assertAsynchronousOperation();
@@ -138,6 +139,7 @@ public class AsynchronousBodyInputStream extends BodyInputStream {
 
     @Override
     public int read(byte[] b, int off, int len) throws IOException {
+        commitMode();
         if (mode == Mode.SYNCHRONOUS) {
             return super.read(b, off, len);
         }
@@ -339,7 +341,7 @@ public class AsynchronousBodyInputStream extends BodyInputStream {
 
     private boolean hasDataToRead() {
         ByteBuffer headBuffer = data.peek();
-        if (headBuffer == null || headBuffer == EOF || headBuffer == ERROR) {
+        if (headBuffer == null || headBuffer == EOF || headBuffer == ERROR || !headBuffer.hasRemaining()) {
             return false;
         }
 
@@ -386,8 +388,16 @@ public class AsynchronousBodyInputStream extends BodyInputStream {
         }
     }
 
-    void setStateChangeLister(StateChangeLister stateChangeLister) {
+    synchronized void setStateChangeLister(StateChangeLister stateChangeLister) {
         this.stateChangeLister = stateChangeLister;
+
+        if (data.getLast() == EOF) {
+            stateChangeLister.onAllDataRead();
+        }
+
+        if (data.getLast() == ERROR) {
+            stateChangeLister.onError(t);
+        }
     }
 
     private enum Mode {

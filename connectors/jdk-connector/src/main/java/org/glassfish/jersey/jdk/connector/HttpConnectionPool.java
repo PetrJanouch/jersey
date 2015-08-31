@@ -93,6 +93,8 @@ public class HttpConnectionPool {
                         destinationPools.remove(destinationKey);
                     }
                 });
+
+                destinationPools.put(destinationKey, destinationConnectionPool);
             }
         }
 

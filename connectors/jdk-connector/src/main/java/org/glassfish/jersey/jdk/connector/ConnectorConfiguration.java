@@ -109,11 +109,11 @@ class ConnectorConfiguration {
                 .DEFAULT_MAX_REDIRECTS, Integer.class);
 
         maxConnectionsPerDestionation = ClientProperties
-                .getValue(properties, JdkConnectorProvider.MAX_CONECTIONS_PER_DESTINATION, JdkConnectorProvider
-                        .DEFAULT_MAX_CONECTIONS_PER_DESTINATION, Integer.class);
+                .getValue(properties, JdkConnectorProvider.MAX_CONNECTIONS_PER_DESTINATION, JdkConnectorProvider
+                        .DEFAULT_MAX_CONNECTIONS_PER_DESTINATION, Integer.class);
 
-        maxConnections = ClientProperties.getValue(properties, JdkConnectorProvider.MAX_CONECTIONS, JdkConnectorProvider
-                .DEFAULT_MAX_CONECTIONS, Integer.class);
+        maxConnections = ClientProperties.getValue(properties, JdkConnectorProvider.MAX_CONNECTIONS, JdkConnectorProvider
+                .DEFAULT_MAX_CONNECTIONS, Integer.class);
 
         connectionIdleTimeout = ClientProperties
                 .getValue(properties, JdkConnectorProvider.CONNECTION_IDLE_TIMEOUT, JdkConnectorProvider

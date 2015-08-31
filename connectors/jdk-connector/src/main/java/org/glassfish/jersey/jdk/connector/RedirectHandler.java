@@ -40,6 +40,7 @@
 
 package org.glassfish.jersey.jdk.connector;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.*;
@@ -87,6 +88,31 @@ class RedirectHandler {
             completionHandler.completed(httpResponse);
             return;
         }
+
+        consumeBodyIfPresent(httpResponse, new CompletionHandler<Void>() {
+            @Override
+            public void failed(Throwable throwable) {
+                completionHandler.failed(throwable);
+            }
+
+            @Override
+            public void completed(Void r) {
+                doRedirect(httpResponse, new CompletionHandler<HttpResponse>() {
+                    @Override
+                    public void failed(Throwable throwable) {
+                        completionHandler.failed(throwable);
+                    }
+
+                    @Override
+                    public void completed(HttpResponse result) {
+                        handleRedirects(result, completionHandler);
+                    }
+                });
+            }
+        });
+    }
+
+    private void doRedirect(final HttpResponse httpResponse, final CompletionHandler<HttpResponse> completionHandler) {
 
         // get location header
         String locationString = null;
@@ -138,6 +164,32 @@ class RedirectHandler {
         lastRequestUri = location;
 
         httpConnectionPool.send(httpRequest, completionHandler);
+    }
+
+    private void consumeBodyIfPresent(HttpResponse response, final CompletionHandler<Void> completionHandler) {
+        final AsynchronousBodyInputStream bodyStream = response.getBodyStream();
+        bodyStream.setReadListener(new ReadListener() {
+            @Override
+            public void onDataAvailable() {
+                while (bodyStream.isReady()) {
+                    try {
+                        bodyStream.read();
+                    } catch (IOException e) {
+                        completionHandler.failed(e);
+                    }
+                }
+            }
+
+            @Override
+            public void onAllDataRead() {
+                completionHandler.completed(null);
+            }
+
+            @Override
+            public void onError(Throwable t) {
+                completionHandler.failed(t);
+            }
+        });
     }
 
     URI getLastRequestUri() {

@@ -45,14 +45,27 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 
 /**
- * Created by petr on 03/05/15.
+ *
  */
 public class BufferedBodyOutputStream extends BodyOutputStream {
 
     private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
 
+    /* This whole mode stuff is totally pointless if we buffer the request body,
+    it is here only in case someone complained that this stream does not behave as BodyOutputStream says it should */
+    private volatile Mode mode = Mode.UNDECIDED;
+
     @Override
     public void setWriteListener(WriteListener writeListener) {
+        if (mode == Mode.ASYNCHRONOUS) {
+            throw new IllegalStateException("Write listener can be set only once");
+        }
+
+        if (mode == Mode.SYNCHRONOUS) {
+            throw new UnsupportedOperationException("Operation not supported in synchronous mode");
+        }
+
+        mode = Mode.ASYNCHRONOUS;
         writeListener.onWritePossible();
     }
 
@@ -63,10 +76,20 @@ public class BufferedBodyOutputStream extends BodyOutputStream {
 
     @Override
     public void write(int b) throws IOException {
+        if (mode == Mode.UNDECIDED) {
+            mode = Mode.SYNCHRONOUS;
+        }
+
         buffer.write(b);
     }
 
     ByteBuffer toBuffer() {
         return ByteBuffer.wrap(buffer.toByteArray());
+    }
+
+    private enum Mode {
+        UNDECIDED,
+        ASYNCHRONOUS,
+        SYNCHRONOUS
     }
 }

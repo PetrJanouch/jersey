@@ -65,6 +65,10 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
 
     @Override
     void write(final HttpRequest httpRequest, final CompletionHandler<HttpRequest> completionHandler) {
+        if (httpRequest.getBodyMode() == HttpRequest.BodyMode.BUFFERED || httpRequest.getBodyMode() == HttpRequest.BodyMode.STREAMING) {
+            httpRequest.addHeaderIfNotPresent("Content-Length", Integer.toString(httpRequest.getBodySize()));
+        }
+
         ByteBuffer header = HttpRequestEncoder.encodeHeader(httpRequest);
         downstreamFilter.write(header, new CompletionHandler<ByteBuffer>() {
             @Override
@@ -150,9 +154,9 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
             upstreamFilter.onRead(httpParser.getHttpResponse());
         }
 
-        if (httpParser.isComplete()) {
-            httpParser.getHttpResponse().getBodyStream().onAllDataRead();
-        }
+//        if (httpParser.isComplete()) {
+//            httpParser.getHttpResponse().getBodyStream().onAllDataRead();
+//        }
 
         return false;
     }

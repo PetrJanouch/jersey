@@ -121,7 +121,7 @@ public class HttpConnectionTest extends JerseyTest {
 
     @Test
     public void testTimeoutConnecting() {
-        HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, CONNECT_TIMEOUT};
+        HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, CONNECT_TIMEOUT, CLOSED};
         HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri(), new HashMap<String, List<String>>());
         ConnectorConfiguration configuration = new ConnectorConfiguration(client(), client().getConfiguration()) {
             @Override
@@ -134,7 +134,7 @@ public class HttpConnectionTest extends JerseyTest {
 
     @Test
     public void testResponseTimeout() {
-        HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, IDLE, SENDING_REQUEST, RECEIVING_HEADER, RESPONSE_TIMEOUT};
+        HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, IDLE, SENDING_REQUEST, RECEIVING_HEADER, RESPONSE_TIMEOUT, CLOSED};
         HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri(), new HashMap<String, List<String>>());
         ConnectorConfiguration configuration = new ConnectorConfiguration(client(), client().getConfiguration()) {
 
@@ -149,7 +149,7 @@ public class HttpConnectionTest extends JerseyTest {
 
     @Test
     public void testIdleTimeout() {
-        HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, IDLE, SENDING_REQUEST, RECEIVING_HEADER, RECEIVING_BODY, IDLE, IDLE_TIMEOUT};
+        HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, IDLE, SENDING_REQUEST, RECEIVING_HEADER, RECEIVING_BODY, IDLE, IDLE_TIMEOUT, CLOSED};
         HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri(), new HashMap<String, List<String>>());
         ConnectorConfiguration configuration = new ConnectorConfiguration(client(), client().getConfiguration()) {
 

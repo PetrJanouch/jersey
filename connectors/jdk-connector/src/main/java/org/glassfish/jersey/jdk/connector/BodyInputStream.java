@@ -64,7 +64,7 @@ public abstract class BodyInputStream extends NonBlockingInputStream {
      * Returns true if data can be read without blocking else returns
      * false.
      * <p/>
-     * If the stream is in asynchronous mode and the user attempts to read from it even though this method returns
+     * If the stream is in ASYNCHRONOUS mode and the user attempts to read from it even though this method returns
      * false, an {@link IllegalStateException} is thrown.
      *
      * @return <code>true</code> if data can be obtained without blocking,

@@ -138,7 +138,7 @@ class TransportFilter extends Filter <ByteBuffer, ByteBuffer, Void, ByteBuffer>{
 
     @Override
     void close() {
-        if (!socketChannel.isOpen()) {
+        if (socketChannel == null || !socketChannel.isOpen()) {
             return;
         }
         try {

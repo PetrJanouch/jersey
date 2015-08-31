@@ -90,8 +90,8 @@ public class DestinationConnectionPool {
         }
 
         synchronized (this) {
+            pendingRequests.add(new RequestRecord(httpRequest, completionHandler));
             if (configuration.getMaxConnectionsPerDestionation() == connectionCounter.get()) {
-                pendingRequests.add(new RequestRecord(httpRequest, completionHandler));
                 return;
             }
 
@@ -99,7 +99,6 @@ public class DestinationConnectionPool {
             connections.add(connection);
             totalConnectionCounter.incrementAndGet();
             connectionCounter.incrementAndGet();
-            requestsInProgress.put(connection, new RequestRecord(httpRequest, completionHandler));
         }
 
         connection.connect();
@@ -148,6 +147,7 @@ public class DestinationConnectionPool {
 
             requestsInProgress.put(connection, pendingRequest);
         }
+
         connection.send(pendingRequest.request);
     }
 
@@ -241,6 +241,7 @@ public class DestinationConnectionPool {
                         }
 
                         default: {
+                            connection.getError().printStackTrace();
                             handleIllegalStateTransition(oldState, newState);
                         }
                     }
