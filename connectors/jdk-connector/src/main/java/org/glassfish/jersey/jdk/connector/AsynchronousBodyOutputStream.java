@@ -95,27 +95,32 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
         doInitialBlocking();
 
         if (len < dataBuffer.remaining()) {
-            for (int i = off; i < len; i++) {
+            for (int i = off; i < off + len; i++) {
                 write(b[i]);
             }
         } else {
-            ByteBuffer buffer = ByteBuffer.allocate(dataBuffer.position() + len);
+            int currentDataLength = dataBuffer.position() + len;
+            int remainder = currentDataLength % dataBuffer.capacity();
+            ByteBuffer buffer = ByteBuffer.allocate(currentDataLength - remainder);
             dataBuffer.flip();
             buffer.put(dataBuffer);
-            buffer.put(b, off, len);
+            buffer.put(b, off, len - remainder);
             buffer.flip();
+            dataBuffer.clear();
+            dataBuffer.put(b, off + len - remainder, remainder);
             write(buffer);
         }
     }
 
     @Override
-    public void flush() throws IOException {
+    public synchronized void flush() throws IOException {
         super.flush();
-
-        if (mode == Mode.ASYNCHRONOUS && !ready) {
-            /* There is no point doing flush while async write to transport is in progress. No new data could have been
-            written since the write to transport started, so all the current content of the data buffer will be written. */
+        if (mode == Mode.UNDECIDED) {
             return;
+        }
+
+        if (mode == Mode.ASYNCHRONOUS) {
+            assertValidState();
         }
 
 
@@ -156,7 +161,7 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
         }
     }
 
-    protected void write(ByteBuffer byteBuffer) throws IOException {
+    protected void write(final ByteBuffer byteBuffer) throws IOException {
         ByteBuffer httpChunk = encodeHttp(byteBuffer);
         if (mode == Mode.SYNCHRONOUS) {
             final CountDownLatch writeLatch = new CountDownLatch(1);
@@ -179,7 +184,7 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
             } catch (InterruptedException e) {
                 throw new IOException("Writing data failed", e);
             }
-            dataBuffer.clear();
+            byteBuffer.clear();
 
             Throwable t = error.get();
             if (t != null) {
@@ -192,7 +197,7 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
                 @Override
                 public void completed(ByteBuffer result) {
                     ready = true;
-                    dataBuffer.clear();
+                    byteBuffer.clear();
                     if (callListener) {
                         callOnWritePossible();
                     }
@@ -217,7 +222,7 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
         }
     }
 
-    void doInitialBlocking() throws IOException {
+    protected void doInitialBlocking() throws IOException {
         if (mode != Mode.SYNCHRONOUS || downstreamFilter != null) {
             return;
         }
@@ -229,7 +234,7 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
         }
     }
 
-    private synchronized void commitMode() {
+    protected synchronized void commitMode() {
         // return if the mode has already been committed
         if (mode != Mode.UNDECIDED) {
             return;

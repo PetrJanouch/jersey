@@ -41,52 +41,61 @@
 package org.glassfish.jersey.jdk.connector;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
+import java.io.OutputStream;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Created by petr on 12/12/14.
+ * Created by petr on 03/09/15.
  */
-class ChunkedBodyOutputStream extends AsynchronousBodyOutputStream {
+public class InterceptingOutputStream extends OutputStream {
 
-    private final static ByteBuffer EMPTY_BUFFER = ByteBuffer.allocate(0);
+    private final OutputStream wrappedStream;
+    private final FirstCallListener firstCallListener;
+    private final AtomicBoolean listenerInvoked = new AtomicBoolean(false);
 
-    private final int chunkSize;
-    private final int encodedFullChunkSize;
-
-    ChunkedBodyOutputStream(int chunkSize) {
-        super(chunkSize);
-        this.chunkSize = chunkSize;
-        this.encodedFullChunkSize = HttpRequestEncoder.getChunkSize(chunkSize);
+    InterceptingOutputStream(OutputStream wrappedStream, FirstCallListener firstCallListener) {
+        this.wrappedStream = wrappedStream;
+        this.firstCallListener = firstCallListener;
     }
 
     @Override
-    synchronized public void close() throws IOException {
-        commitMode();
-        doInitialBlocking();
-        flush();
-        write(EMPTY_BUFFER);
-        super.close();
+    public void write(byte[] b) throws IOException {
+        tryInvokeListener();
+        wrappedStream.write(b);
     }
 
     @Override
-    protected ByteBuffer encodeHttp(ByteBuffer byteBuffer) {
-        if (byteBuffer.remaining() < chunkSize) {
-            return HttpRequestEncoder.encodeChunk(byteBuffer);
-        }
+    public void write(byte[] b, int off, int len) throws IOException {
+        tryInvokeListener();
+        wrappedStream.write(b, off, len);
+    }
 
-        if (byteBuffer.remaining() % chunkSize != 0) {
-            throw new IllegalStateException("TODO");
-        }
+    @Override
+    public void flush() throws IOException {
+        tryInvokeListener();
+        wrappedStream.flush();
+    }
 
-        int numberOfChunks = byteBuffer.remaining() / chunkSize;
-        ByteBuffer encodedChunks = ByteBuffer.allocate(numberOfChunks * encodedFullChunkSize);
-        for (int i = 0; i < numberOfChunks; i++) {
-            byteBuffer.position(i * chunkSize);
-            byteBuffer.limit(i * chunkSize + chunkSize);
-            ByteBuffer encodeChunk = HttpRequestEncoder.encodeChunk(byteBuffer);
-            encodedChunks.put(encodeChunk);
+    @Override
+    public void close() throws IOException {
+        tryInvokeListener();
+        wrappedStream.close();
+    }
+
+    @Override
+    public void write(int b) throws IOException {
+        tryInvokeListener();
+        wrappedStream.write(b);
+    }
+
+    private void tryInvokeListener() {
+        if (listenerInvoked.compareAndSet(false, true)) {
+            this.firstCallListener.onInvoked();
         }
-        encodedChunks.flip();
-        return encodedChunks;
+    }
+
+    interface FirstCallListener {
+
+        void onInvoked();
     }
 }

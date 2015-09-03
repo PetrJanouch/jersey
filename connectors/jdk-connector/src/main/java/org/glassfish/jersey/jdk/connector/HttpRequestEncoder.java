@@ -110,13 +110,25 @@ public class HttpRequestEncoder {
         if (data.remaining() == 0) {
             return ByteBuffer.wrap(LAST_CHUNK);
         }
-        String chunkStart = Integer.toHexString(data.limit()) + LINE_SEPARATOR;
-        byte[] startBytes = chunkStart.getBytes(Charset.forName(ENCODING));
-        ByteBuffer chunkBuffer = ByteBuffer.allocate(startBytes.length + data.limit() + 2);
+        byte[] startBytes = getChunkHeaderBytes(data.remaining());
+        ByteBuffer chunkBuffer = ByteBuffer.allocate(startBytes.length + data.remaining() + 2);
         chunkBuffer.put(startBytes);
         chunkBuffer.put(data);
         chunkBuffer.put(LINE_SEPARATOR.getBytes(Charset.forName(ENCODING)));
         chunkBuffer.flip();
         return chunkBuffer;
+    }
+
+    private static byte[] getChunkHeaderBytes(int dataLength) {
+        String chunkStart = Integer.toHexString(dataLength) + LINE_SEPARATOR;
+        return chunkStart.getBytes(Charset.forName(ENCODING));
+    }
+
+    static int getChunkSize(int dataLength) {
+        if (dataLength == 0) {
+            return LAST_CHUNK.length;
+        }
+
+        return getChunkHeaderBytes(dataLength).length + dataLength + 2;
     }
 }

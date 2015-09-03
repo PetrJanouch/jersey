@@ -95,35 +95,35 @@ public class HttpConnectionTest extends JerseyTest {
     @Test
     public void testBasic() {
         HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, IDLE, SENDING_REQUEST, RECEIVING_HEADER, RECEIVING_BODY, RECEIVED, IDLE};
-        HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri(), new HashMap<String, List<String>>());
+        HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri());
         doTest(ERROR_STATE.NONE, expectedStates, request);
     }
 
     @Test
     public void testMultipleRequests() {
         HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, IDLE, SENDING_REQUEST, RECEIVING_HEADER, RECEIVING_BODY, RECEIVED, IDLE, SENDING_REQUEST, RECEIVING_HEADER, RECEIVING_BODY, RECEIVED, IDLE};
-        HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri(), new HashMap<String, List<String>>());
+        HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri());
         doTest(ERROR_STATE.NONE, expectedStates, request, request);
     }
 
     @Test
     public void testErrorSending() {
         HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, IDLE, SENDING_REQUEST, ERROR, CLOSED};
-        HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri(), new HashMap<String, List<String>>());
+        HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri());
         doTest(ERROR_STATE.SENDING, expectedStates, request);
     }
 
     @Test
     public void testErrorReceiving() {
         HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, IDLE, SENDING_REQUEST, RECEIVING_HEADER, ERROR, CLOSED};
-        HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri(), new HashMap<String, List<String>>());
+        HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri());
         doTest(ERROR_STATE.RECEIVING_HEADER, expectedStates, request);
     }
 
     @Test
     public void testTimeoutConnecting() {
         HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, CONNECT_TIMEOUT, CLOSED};
-        HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri(), new HashMap<String, List<String>>());
+        HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri());
         ConnectorConfiguration configuration = new ConnectorConfiguration(client(), client().getConfiguration()) {
             @Override
             int getConnectTimeout() {
@@ -136,7 +136,7 @@ public class HttpConnectionTest extends JerseyTest {
     @Test
     public void testResponseTimeout() {
         HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, IDLE, SENDING_REQUEST, RECEIVING_HEADER, RESPONSE_TIMEOUT, CLOSED};
-        HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri(), new HashMap<String, List<String>>());
+        HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri());
         ConnectorConfiguration configuration = new ConnectorConfiguration(client(), client().getConfiguration()) {
 
             @Override
@@ -151,7 +151,7 @@ public class HttpConnectionTest extends JerseyTest {
     @Test
     public void testIdleTimeout() {
         HttpConnection.State[] expectedStates = new HttpConnection.State[]{CONNECTING, IDLE, SENDING_REQUEST, RECEIVING_HEADER, RECEIVING_BODY, RECEIVED, IDLE, IDLE_TIMEOUT, CLOSED};
-        HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri(), new HashMap<String, List<String>>());
+        HttpRequest request = HttpRequest.createBodyless("GET", target("hello").getUri());
         ConnectorConfiguration configuration = new ConnectorConfiguration(client(), client().getConfiguration()) {
 
             @Override

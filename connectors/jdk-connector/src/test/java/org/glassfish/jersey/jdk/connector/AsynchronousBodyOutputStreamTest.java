@@ -277,7 +277,7 @@ public class AsynchronousBodyOutputStreamTest {
             assertFalse(future.isDone());
             stream.open(transportFilter);
 
-            assertTrue(future.get(5, TimeUnit.SECONDS));
+            assertTrue(future.get(300, TimeUnit.SECONDS));
             writeToStream(stream, msg2, useArray);
             writeToStream(stream, msg3, useArray);
             stream.close();

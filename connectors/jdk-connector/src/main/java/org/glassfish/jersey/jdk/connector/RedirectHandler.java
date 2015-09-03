@@ -173,7 +173,8 @@ class RedirectHandler {
             headers.remove("Transfer-Encoding");
         }
 
-        HttpRequest httpRequest = HttpRequest.createBodyless(method, location, headers);
+        HttpRequest httpRequest = HttpRequest.createBodyless(method, location);
+        httpRequest.getHeaders().putAll(headers);
         lastRequestUri = location;
 
         httpConnectionPool.send(httpRequest, completionHandler);

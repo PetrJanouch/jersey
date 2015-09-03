@@ -43,9 +43,12 @@ package org.glassfish.jersey.jdk.connector;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
+import junit.framework.Assert;
 import org.junit.Test;
 
 import static junit.framework.Assert.assertEquals;
+import static junit.framework.Assert.assertFalse;
+import static junit.framework.Assert.assertTrue;
 import static junit.framework.TestCase.fail;
 
 /**
@@ -56,9 +59,7 @@ public class ChunkedBodyOutputStreamTest {
     @Test
     public void testBasic() throws IOException {
         AsynchronousBodyInputStream responseBody = new AsynchronousBodyInputStream();
-        ChunkedBodyOutputStream chunkedStream = new ChunkedBodyOutputStream(20);
-        Filter<ByteBuffer, ?, ?, ?> mockTransportFilter = createMockTransportFilter(responseBody);
-        chunkedStream.open(mockTransportFilter);
+        ChunkedBodyOutputStream chunkedStream = getOutputStrem(responseBody, 21);
 
         String sentBody = TestUtils.generateBody(500);
         byte[] sentBytes = sentBody.getBytes();
@@ -67,7 +68,67 @@ public class ChunkedBodyOutputStreamTest {
         }
 
         chunkedStream.close();
+        verifyReceivedMessage(sentBody, responseBody);
+    }
 
+    @Test
+    public void testChunkSize() throws IOException {
+        doTestChunkSize(1);
+    }
+
+    @Test
+    public void testChunkSizeWithArray() throws IOException {
+        doTestChunkSize(8);
+    }
+
+    private void doTestChunkSize(int batchSize) throws IOException {
+        final int chunkSize = 21;
+        AsynchronousBodyInputStream responseBody = new AsynchronousBodyInputStream() {
+
+            private boolean receivedLess = false;
+
+            @Override
+            synchronized void onData(ByteBuffer buffer) {
+                if (buffer.remaining() > chunkSize) {
+                    fail();
+                }
+
+                if (buffer.remaining() < chunkSize) {
+                    assertFalse(receivedLess);
+                    receivedLess = true;
+                }
+
+                super.onData(buffer);
+            }
+        };
+
+        ChunkedBodyOutputStream chunkedStream = getOutputStrem(responseBody, chunkSize);
+
+        String sentBody = TestUtils.generateBody(100);
+        byte[] sentBytes = sentBody.getBytes();
+        if (batchSize > 1) {
+            for (int i = 0; i < sentBytes.length; i += 8) {
+                chunkedStream.write(sentBytes, i, Math.min(sentBytes.length - i, 8));
+            }
+        } else {
+            for (byte b : sentBytes) {
+                chunkedStream.write(b);
+            }
+        }
+
+        chunkedStream.close();
+        verifyReceivedMessage(sentBody, responseBody);
+    }
+
+    private ChunkedBodyOutputStream getOutputStrem(AsynchronousBodyInputStream responseBody, int chunkSize) {
+        ChunkedBodyOutputStream chunkedStream = new ChunkedBodyOutputStream(chunkSize);
+        Filter<ByteBuffer, ?, ?, ?> mockTransportFilter = createMockTransportFilter(responseBody);
+        chunkedStream.open(mockTransportFilter);
+        return chunkedStream;
+    }
+
+    private void verifyReceivedMessage(String sentBody, AsynchronousBodyInputStream responseBody) throws IOException {
+        byte[] sentBytes = sentBody.getBytes();
         byte[] receivedBytes = new byte[sentBytes.length];
 
         for (int i = 0; i < sentBytes.length; i++) {

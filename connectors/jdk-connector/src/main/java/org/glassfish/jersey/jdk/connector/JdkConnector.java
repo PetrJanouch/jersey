@@ -56,7 +56,6 @@ import java.io.OutputStream;
 import java.net.CookieManager;
 import java.net.URI;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Future;
@@ -107,24 +106,78 @@ class JdkConnector implements Connector {
     @Override
     public Future<?> apply(final ClientRequest request, final AsyncConnectorCallback callback) {
         final SettableFuture<ClientResponse> responseFuture = SettableFuture.create();
+        final AsyncConnectorCallback internalCallback = new AsyncConnectorCallback() {
+            @Override
+            public void response(ClientResponse response) {
+                callback.response(response);
+                responseFuture.set(response);
+            }
 
-        HttpRequest httpRequest = createHttpRequest(request);
+            @Override
+            public void failure(Throwable failure) {
+                callback.failure(failure);
+                responseFuture.setException(failure);
+            }
+        };
+
+        final HttpRequest httpRequest = createHttpRequest(request);
 
         if (httpRequest.getBodyMode() == HttpRequest.BodyMode.BUFFERED) {
+            writeBufferedEntity(request, httpRequest, internalCallback);
+        }
+
+        if (httpRequest.getBodyMode() == HttpRequest.BodyMode.BUFFERED || httpRequest.getBodyMode() == HttpRequest.BodyMode.NONE) {
+            send(request, httpRequest, internalCallback);
+        }
+
+        if (httpRequest.getBodyMode() == HttpRequest.BodyMode.STREAMING || httpRequest.getBodyMode() == HttpRequest.BodyMode.CHUNKED) {
+            final InterceptingOutputStream bodyStream = new InterceptingOutputStream(httpRequest.getBodyStream(), new InterceptingOutputStream.FirstCallListener() {
+                @Override
+                public void onInvoked() {
+                    send(request, httpRequest, internalCallback);
+                }
+            });
+
+            request.setStreamProvider(new OutboundMessageContext.StreamProvider() {
+
+                @Override
+                public OutputStream getOutputStream(int contentLength) throws IOException {
+                    return bodyStream;
+                }
+            });
             try {
                 request.writeEntity();
             } catch (IOException e) {
-                callback.failure(e);
+                internalCallback.failure(e);
             }
         }
 
+        return responseFuture;
+    }
+
+    private void writeBufferedEntity(ClientRequest request, final HttpRequest httpRequest, AsyncConnectorCallback callback) {
+        request.setStreamProvider(new OutboundMessageContext.StreamProvider() {
+
+            @Override
+            public OutputStream getOutputStream(int contentLength) throws IOException {
+                return httpRequest.getBodyStream();
+            }
+        });
+        try {
+            request.writeEntity();
+        } catch (IOException e) {
+            callback.failure(e);
+        }
+    }
+
+    private void send(final ClientRequest request, final HttpRequest httpRequest, final AsyncConnectorCallback callback) {
+        translateHeaders(request, httpRequest);
         final RedirectHandler redirectHandler = new RedirectHandler(httpConnectionPool, httpRequest, connectorConfiguration);
         httpConnectionPool.send(httpRequest, new CompletionHandler<HttpResponse>() {
 
             @Override
             public void failed(Throwable throwable) {
                 callback.failure(throwable);
-                responseFuture.setException(throwable);
             }
 
             @Override
@@ -133,39 +186,23 @@ class JdkConnector implements Connector {
                     @Override
                     public void failed(Throwable throwable) {
                         callback.failure(throwable);
-                        responseFuture.setException(throwable);
                     }
 
                     @Override
                     public void completed(HttpResponse result) {
                         ClientResponse response = translate(request, result, redirectHandler.getLastRequestUri());
                         callback.response(response);
-                        responseFuture.set(response);
                     }
                 });
             }
         });
-
-        if (httpRequest.getBodyMode() == HttpRequest.BodyMode.STREAMING || httpRequest.getBodyMode() == HttpRequest.BodyMode
-                .CHUNKED) {
-            try {
-                request.writeEntity();
-            } catch (IOException e) {
-                callback.failure(e);
-            }
-        }
-
-        return responseFuture;
     }
 
     private HttpRequest createHttpRequest(final ClientRequest request) {
         final Object entity = request.getEntity();
 
         if (entity == null) {
-            HttpRequest bodyless = HttpRequest.createBodyless(request.getMethod(), request.getUri(), translateHeaders(request));
-            // TODO
-            bodyless.addHeaderIfNotPresent("Accept", "text/html, image/gif, image/jpeg, *; q=.2, */*; q=.2");
-            return bodyless;
+            return HttpRequest.createBodyless(request.getMethod(), request.getUri());
         }
 
         RequestEntityProcessing entityProcessing = request.resolveProperty(
@@ -176,29 +213,17 @@ class JdkConnector implements Connector {
         final HttpRequest httpRequest;
         if (entityProcessing == null && connectorConfiguration.isFixLengthStreaming() && length > 0) {
             httpRequest = HttpRequest
-                    .createStreamed(request.getMethod(), request.getUri(), translateHeaders(request), length);
+                    .createStreamed(request.getMethod(), request.getUri(), length);
         } else if (entityProcessing != null && entityProcessing == RequestEntityProcessing.CHUNKED) {
-            httpRequest = HttpRequest.createChunked(request.getMethod(), request.getUri(), translateHeaders(request),
-                    connectorConfiguration.getChunkSize());
+            httpRequest = HttpRequest.createChunked(request.getMethod(), request.getUri(), connectorConfiguration.getChunkSize());
         } else {
-            httpRequest= HttpRequest.createBuffered(request.getMethod(), request.getUri(), translateHeaders(request));
+            httpRequest= HttpRequest.createBuffered(request.getMethod(), request.getUri());
         }
-
-        request.setStreamProvider(new OutboundMessageContext.StreamProvider() {
-
-            @Override
-            public OutputStream getOutputStream(int contentLength) throws IOException {
-                return httpRequest.getBodyStream();
-            }
-        });
-
-        // TODO
-        httpRequest.addHeaderIfNotPresent("Accept", "text/html, image/gif, image/jpeg, *; q=.2, */*; q=.2");
         return httpRequest;
     }
 
-    private Map<String, List<String>> translateHeaders(ClientRequest clientRequest) {
-        Map<String, List<String>> headers = new HashMap<>();
+    private Map<String, List<String>> translateHeaders(ClientRequest clientRequest, HttpRequest httpRequest) {
+        Map<String, List<String>> headers = httpRequest.getHeaders();
         for (Map.Entry<String, List<String>> header : clientRequest.getStringHeaders().entrySet()) {
             List<String> values = new ArrayList<>(header.getValue());
             headers.put(header.getKey(), values);
@@ -247,6 +272,6 @@ class JdkConnector implements Connector {
 
     @Override
     public void close() {
-       // httpConnectionPool.shutDown();
+      //  httpConnectionPool.close();
     }
 }

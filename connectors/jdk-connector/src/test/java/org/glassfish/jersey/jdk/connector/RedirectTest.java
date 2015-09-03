@@ -66,7 +66,6 @@ import static org.junit.Assert.assertEquals;
  */
 public class RedirectTest extends JerseyTest {
 
-    private static String MSG ="My awesome message";
     private static String TARGET_GET_MSG = "You have reached the target";
 
     @Path("/redirecting")
