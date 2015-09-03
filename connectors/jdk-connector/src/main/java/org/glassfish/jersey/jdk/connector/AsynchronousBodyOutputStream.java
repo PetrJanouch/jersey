@@ -118,6 +118,11 @@ abstract class AsynchronousBodyOutputStream extends BodyOutputStream {
             return;
         }
 
+
+        if (dataBuffer.position() == 0) {
+            return;
+        }
+
         dataBuffer.flip();
         write(dataBuffer);
     }

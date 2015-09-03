@@ -416,8 +416,26 @@ public class HttpParserTest {
         assertTrue(httpParser.isComplete());
 
         verifyHeaderValue("name1", "value1");
-        verifyHeaderValue("name2", "value2", "value2");
+        verifyHeaderValue("name2", "value2", "value4");
         verifyHeaderValue("name3", "value3");
+    }
+
+    @Test
+    public void testInseparableHeaders() throws ParseException {
+        httpParser.reset(false);
+        StringBuilder request = new StringBuilder();
+        request.append("HTTP/1.1 123 A meaningful code\r\n")
+                .append("name1: value1\r\n")
+                .append("WWW-Authenticate: value2, value4\r\n")
+                .append("name3: value3, value5\r\n\r\n");
+        feedParser(request.toString(), Integer.MAX_VALUE);
+
+        assertTrue(httpParser.isHeaderParsed());
+        assertTrue(httpParser.isComplete());
+
+        verifyHeaderValue("name1", "value1");
+        verifyHeaderValue("WWW-Authenticate", "value2, value4");
+        verifyHeaderValue("name3", "value3", "value5");
     }
 
     private void testTrailerHeaders(int segmentSize, int chunkSize) throws IOException, ParseException {

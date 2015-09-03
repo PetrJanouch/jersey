@@ -157,7 +157,12 @@ public class HttpConnection {
             handleError(e);
             return;
         }
-        httpRequest.getHeaders().putAll(cookies);
+
+        for (Map.Entry<String, List<String>> cookieHeader : cookies.entrySet()) {
+            if (cookieHeader.getValue() != null && !cookieHeader.getValue().isEmpty()) {
+                httpRequest.getHeaders().put(cookieHeader.getKey(), cookieHeader.getValue());
+            }
+        }
     }
 
     private void processResponseHeaders(HttpResponse response) throws IOException {

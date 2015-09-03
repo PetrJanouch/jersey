@@ -85,6 +85,7 @@ class GrizzlyHttpParserUtils {
 
 
     static class HeaderParsingState {
+        final int maxHeaderSize;
         int packetLimit;
 
         int state;
@@ -103,7 +104,7 @@ class GrizzlyHttpParserUtils {
         boolean contentLengthsDiffer;
 
         HeaderParsingState(int maxHeaderSize) {
-            packetLimit = offset + maxHeaderSize;
+            this.maxHeaderSize = maxHeaderSize;
         }
 
         void recycle() {
@@ -116,6 +117,8 @@ class GrizzlyHttpParserUtils {
             parsingNumericValue = 0;
             contentLengthHeadersCount = 0;
             contentLengthsDiffer = false;
+            headerName = null;
+            packetLimit = maxHeaderSize;
         }
 
         void checkOverflow(final String errorDescriptionIfOverflow) throws ParseException {

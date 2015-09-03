@@ -102,8 +102,9 @@ class GrizzlyHttpParser {
     }
 
     void parse(ByteBuffer input) throws ParseException {
-        System.out.println(parseString(input, 0, input.limit()));
-        input.position(0);
+        int p = input.position();
+        System.out.println(parseString(input, p, input.limit()));
+        input.position(p);
         if (buffer.remaining() > 0) {
             input = Utils.appendBuffers(buffer, input, bufferMaxSize, BUFFER_STEP_SIZE);
         }
@@ -159,7 +160,7 @@ class GrizzlyHttpParser {
         switch (headerParsingState.state) {
             case 0: { // parsing initial line
                 if (!decodeInitialLineFromBuffer(input)) {
-                    headerParsingState.checkOverflow("HTTP packet intial line is too large");
+                    headerParsingState.checkOverflow("HTTP packet initial line is too large");
                     return false;
                 }
 
@@ -399,7 +400,7 @@ class GrizzlyHttpParser {
 
         while (offset < limit) {
             final byte b = input.get(offset);
-            if (b == GrizzlyHttpParserUtils.COMMA) {
+            if (b == GrizzlyHttpParserUtils.COMMA && !isUnseparableHeader()) {
                 headerParsingState.offset = offset + 1;
                 String value = parseString(input,
                         headerParsingState.start, headerParsingState.checkpoint2);
@@ -447,6 +448,14 @@ class GrizzlyHttpParser {
         }
         headerParsingState.offset = offset;
         return -1;
+    }
+
+    private boolean isUnseparableHeader() {
+        if ("WWW-Authenticate".equalsIgnoreCase(headerParsingState.headerName)) {
+            return true;
+        }
+
+        return false;
     }
 
     private void decideTransferEncoding() throws ParseException {

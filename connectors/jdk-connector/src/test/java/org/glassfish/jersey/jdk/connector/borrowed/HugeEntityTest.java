@@ -73,7 +73,6 @@ import static org.hamcrest.MatcherAssert.assertThat;
  */
 
 // TODO: Borrowed from Grizzly connector, decide if to keep
-    @Ignore
 public class HugeEntityTest extends JerseyTest {
 
     private static final int BUFFER_LENGTH = 1024 * 1024; // 1M

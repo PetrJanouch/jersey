@@ -44,9 +44,11 @@ import org.glassfish.jersey.client.ClientConfig;
 import org.glassfish.jersey.client.ClientProperties;
 import org.glassfish.jersey.server.ResourceConfig;
 import org.glassfish.jersey.test.JerseyTest;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import javax.ws.rs.GET;
+import javax.ws.rs.HEAD;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.client.Entity;
@@ -55,6 +57,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.UriBuilder;
 
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.junit.Assert.assertEquals;
 
@@ -63,29 +66,66 @@ import static org.junit.Assert.assertEquals;
  */
 public class RedirectTest extends JerseyTest {
 
+    private static String MSG ="My awesome message";
+    private static String TARGET_GET_MSG = "You have reached the target";
+
     @Path("/redirecting")
     public static class RedirectingResource {
 
-        @GET
-        public Response get() {
+        private Response get303RedirectToTarget() {
             return  Response.seeOther(UriBuilder.fromResource(RedirectingResource.class).path("target").build()).build();
         }
 
+        private Response get307RedirectToTarget() {
+            return  Response.temporaryRedirect(UriBuilder.fromResource(RedirectingResource.class).path("target").build()).build();
+        }
+
+        @Path("303")
+        @HEAD
+        public Response head303() {
+            return get303RedirectToTarget();
+        }
+
+        @Path("303")
+        @GET
+        public Response get303() {
+            return get303RedirectToTarget();
+        }
+
+        @Path("303")
         @POST
-        public Response post(String entity) {
-            return  Response.seeOther(UriBuilder.fromResource(RedirectingResource.class).path("target").build()).build();
+        public Response post303(String entity) {
+            return get303RedirectToTarget();
+        }
+
+        @Path("307")
+        @HEAD
+        public Response head307() {
+            return  get307RedirectToTarget();
+        }
+
+        @Path("307")
+        @GET
+        public Response get307() {
+            return  get307RedirectToTarget();
+        }
+
+        @Path("307")
+        @POST
+        public Response post307(String entity) {
+            return  get307RedirectToTarget();
         }
 
         @Path("target")
         @GET
         public String target() {
-            return "Target";
+            return TARGET_GET_MSG;
         }
 
         @Path("target")
         @POST
         public String target(String entity) {
-            return "Target";
+            return entity;
         }
 
         @Path("cycle")
@@ -115,7 +155,7 @@ public class RedirectTest extends JerseyTest {
         @Path("maxRedirectNode2")
         @GET
         public Response maxRedirectNode2() {
-            return  Response.seeOther(UriBuilder.fromResource(RedirectingResource.class).build()).build();
+            return  Response.seeOther(UriBuilder.fromResource(RedirectingResource.class).path("target").build()).build();
         }
     }
 
@@ -130,22 +170,53 @@ public class RedirectTest extends JerseyTest {
     }
 
     @Test
-    public void testBasicGet() {
-        Response response = target("redirecting").request().get();
-        assertEquals(200, response.getStatus());
-        assertEquals("Target", response.readEntity(String.class));
-    }
-
-    @Test
     public void testDisableRedirect() {
-        Response response = target("redirecting").property(ClientProperties.FOLLOW_REDIRECTS, false).request().get();
+        Response response = target("redirecting/303").property(ClientProperties.FOLLOW_REDIRECTS, false).request().get();
         assertEquals(303, response.getStatus());
     }
 
     @Test
-    public void testPost() {
-        Response response = target("redirecting").request().post(Entity.entity("My awesome message", MediaType.TEXT_PLAIN));
-        assertEquals(303, response.getStatus());
+    public void testGet303() {
+        Response response = target("redirecting/303").request().get();
+        assertEquals(200, response.getStatus());
+        assertEquals(TARGET_GET_MSG, response.readEntity(String.class));
+    }
+
+    @Test
+    public void testPost303() {
+        Response response = target("redirecting/303").request().post(Entity.entity("My awesome message", MediaType.TEXT_PLAIN));
+        assertEquals(200, response.getStatus());
+        assertEquals(TARGET_GET_MSG, response.readEntity(String.class));
+    }
+
+    @Test
+    public void testHead303() {
+        Response response = target("redirecting/303").request().head();
+        assertEquals(200, response.getStatus());
+        assertTrue(response.readEntity(String.class).isEmpty());
+    }
+
+    // in this implementation; 301, 307 and 308 work exactly the same
+    @Test
+    public void testGet307() {
+        Response response = target("redirecting/307").request().get();
+        assertEquals(200, response.getStatus());
+        assertEquals(TARGET_GET_MSG, response.readEntity(String.class));
+    }
+
+    // in this implementation; 301, 307 and 308 work exactly the same
+    @Test
+    public void testPost307() {
+        Response response = target("redirecting/307").request().post(Entity.entity("My awesome message", MediaType.TEXT_PLAIN));
+        assertEquals(307, response.getStatus());
+    }
+
+    // in this implementation; 301, 307 and 308 work exactly the same
+    @Test
+    public void testHead307() {
+        Response response = target("redirecting/307").request().head();
+        assertEquals(200, response.getStatus());
+        assertTrue(response.readEntity(String.class).isEmpty());
     }
 
     @Test
@@ -159,9 +230,16 @@ public class RedirectTest extends JerseyTest {
     }
 
     @Test
-    public void testMaxRedirects() {
+    public void testMaxRedirectsSuccess() {
+        Response response = target("redirecting/maxRedirect").property(JdkConnectorProvider.MAX_REDIRECTS, 2).request().get();
+        assertEquals(200, response.getStatus());
+        assertEquals(TARGET_GET_MSG, response.readEntity(String.class));
+    }
+
+    @Test
+    public void testMaxRedirectsFail() {
         try {
-            target("redirecting/maxRedirect").property(JdkConnectorProvider.MAX_REDIRECTS, 2).request().get();
+            target("redirecting/maxRedirect").property(JdkConnectorProvider.MAX_REDIRECTS, 1).request().get();
             fail();
         } catch (Throwable t) {
             assertEquals(RedirectException.class.getName(), t.getCause().getCause().getClass().getName());

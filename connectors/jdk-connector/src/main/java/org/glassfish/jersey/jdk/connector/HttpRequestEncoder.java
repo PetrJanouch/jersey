@@ -82,13 +82,13 @@ public class HttpRequestEncoder {
         request.append(httpRequest.getMethod());
         request.append(" ");
         URI uri = httpRequest.getUri();
-        String path = uri.getPath();
+        String path = uri.getRawPath();
         if (path == null || path.isEmpty()) {
             path = "/";
         }
 
-        if (uri.getQuery() != null) {
-            path += "?" + uri.getQuery();
+        if (uri.getRawQuery() != null) {
+            path += "?" + uri.getRawQuery();
         }
         request.append(path);
         request.append(" ");
@@ -101,6 +101,7 @@ public class HttpRequestEncoder {
         appendFirstLine(request, httpRequest);
         appendUpgradeHeaders(request, httpRequest.getHeaders());
         String requestStr = request.toString();
+        System.out.println(requestStr);
         byte[] bytes = requestStr.getBytes(Charset.forName(ENCODING));
         return ByteBuffer.wrap(bytes);
     }

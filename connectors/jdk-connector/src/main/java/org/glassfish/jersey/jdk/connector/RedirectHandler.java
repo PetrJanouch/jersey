@@ -50,11 +50,13 @@ import java.util.logging.Logger;
 /**
  * Created by petr on 20/01/15.
  */
+// TODO what about 300?
+// TODO Post and Put do not work with 307 and 308
 class RedirectHandler {
 
     private static final Logger LOGGER = Logger.getLogger(RedirectHandler.class.getName());
     private static final Set<Integer> REDIRECT_STATUS_CODES = Collections
-            .unmodifiableSet(new HashSet<>(Arrays.asList(300, 301, 302, 303, 307, 308)));
+            .unmodifiableSet(new HashSet<>(Arrays.asList(301, 302, 303, 307, 308)));
 
     private final int maxRedirects;
     private final boolean followRedirects;
@@ -71,6 +73,7 @@ class RedirectHandler {
         this.httpConnectionPool = httpConnectionPool;
         this.originalHttpRequest = originalHttpRequest;
         this.redirectUriHistory = new HashSet<>(maxRedirects);
+        this.lastRequestUri = originalHttpRequest.getUri();
     }
 
     void handleRedirects(final HttpResponse httpResponse, final CompletionHandler<HttpResponse> completionHandler) {
@@ -84,9 +87,11 @@ class RedirectHandler {
             return;
         }
 
-        if (!"HEAD".equals(originalHttpRequest.getMethod()) && !"GET".equals(originalHttpRequest.getMethod())) {
-            completionHandler.completed(httpResponse);
-            return;
+        if (httpResponse.getStatusCode() != 303) {
+            if (!"HEAD".equals(originalHttpRequest.getMethod()) && !"GET".equals(originalHttpRequest.getMethod())) {
+                completionHandler.completed(httpResponse);
+                return;
+            }
         }
 
         consumeBodyIfPresent(httpResponse, new CompletionHandler<Void>() {
@@ -160,7 +165,15 @@ class RedirectHandler {
             return;
         }
 
-        final HttpRequest httpRequest = HttpRequest.createBodyless(originalHttpRequest.getMethod(), location, originalHttpRequest.getHeaders());
+        String method = originalHttpRequest.getMethod();
+        Map<String, List<String>> headers = originalHttpRequest.getHeaders();
+        if (httpResponse.getStatusCode() == 303 && !method.equals("HEAD")) {
+            method = "GET";
+            headers.remove("Content-Length");
+            headers.remove("Transfer-Encoding");
+        }
+
+        HttpRequest httpRequest = HttpRequest.createBodyless(method, location, headers);
         lastRequestUri = location;
 
         httpConnectionPool.send(httpRequest, completionHandler);

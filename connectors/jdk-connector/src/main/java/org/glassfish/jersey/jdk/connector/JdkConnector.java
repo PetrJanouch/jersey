@@ -162,7 +162,10 @@ class JdkConnector implements Connector {
         final Object entity = request.getEntity();
 
         if (entity == null) {
-            return HttpRequest.createBodyless(request.getMethod(), request.getUri(), translateHeaders(request));
+            HttpRequest bodyless = HttpRequest.createBodyless(request.getMethod(), request.getUri(), translateHeaders(request));
+            // TODO
+            bodyless.addHeaderIfNotPresent("Accept", "text/html, image/gif, image/jpeg, *; q=.2, */*; q=.2");
+            return bodyless;
         }
 
         RequestEntityProcessing entityProcessing = request.resolveProperty(
@@ -189,6 +192,8 @@ class JdkConnector implements Connector {
             }
         });
 
+        // TODO
+        httpRequest.addHeaderIfNotPresent("Accept", "text/html, image/gif, image/jpeg, *; q=.2, */*; q=.2");
         return httpRequest;
     }
 

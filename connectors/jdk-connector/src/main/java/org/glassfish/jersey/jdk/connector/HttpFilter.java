@@ -52,7 +52,7 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
     private static String CONNECT_METHOD = "CONNECT";
 
     private final GrizzlyHttpParser httpParser;
-    private boolean expectingReply = false;
+    private volatile boolean expectingReply = false;
     /**
      * Constructor.
      *
@@ -70,6 +70,7 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
         }
 
         ByteBuffer header = HttpRequestEncoder.encodeHeader(httpRequest);
+        prepareForReply(httpRequest, completionHandler);
         downstreamFilter.write(header, new CompletionHandler<ByteBuffer>() {
             @Override
             public void failed(Throwable throwable) {
@@ -86,7 +87,7 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
     private void writeBody(final HttpRequest httpRequest, final CompletionHandler<HttpRequest> completionHandler) {
         switch (httpRequest.getBodyMode()) {
             case NONE: {
-                prepareForReply(httpRequest, completionHandler);
+              //  prepareForReply(httpRequest, completionHandler);
                 break;
             }
 
@@ -97,7 +98,7 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
                 bodyStream.setCloseListener(new AsynchronousBodyOutputStream.Listener() {
                     @Override
                     public void onClosed() {
-                        prepareForReply(httpRequest, completionHandler);
+                      //  prepareForReply(httpRequest, completionHandler);
                     }
                 });
                 break;
@@ -113,7 +114,7 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
 
                     @Override
                     public void completed(ByteBuffer result) {
-                        prepareForReply(httpRequest, completionHandler);
+                      //  prepareForReply(httpRequest, completionHandler);
                     }
                 });
 
@@ -151,12 +152,11 @@ class HttpFilter extends Filter<HttpRequest, HttpResponse, ByteBuffer, ByteBuffe
         }
 
         if (!headerParsed && httpParser.isHeaderParsed()) {
+            HttpResponse httpResponse = httpParser.getHttpResponse();
+        //    httpResponse.removeHeader("Content-Length");
+         //   httpResponse.removeHeader("Transfer-Encoding");
             upstreamFilter.onRead(httpParser.getHttpResponse());
         }
-
-//        if (httpParser.isComplete()) {
-//            httpParser.getHttpResponse().getBodyStream().onAllDataRead();
-//        }
 
         return false;
     }

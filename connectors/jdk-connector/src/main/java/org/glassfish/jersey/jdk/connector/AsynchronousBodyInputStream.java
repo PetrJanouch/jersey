@@ -218,6 +218,10 @@ public class AsynchronousBodyInputStream extends BodyInputStream {
     synchronized void onData(ByteBuffer buffer) {
         assertClosedForInput();
 
+        if (!buffer.hasRemaining()) {
+            return;
+        }
+
         if (mode == Mode.SYNCHRONOUS) {
             try {
                 synchronousStream.put(buffer);
@@ -391,11 +395,11 @@ public class AsynchronousBodyInputStream extends BodyInputStream {
     synchronized void setStateChangeLister(StateChangeLister stateChangeLister) {
         this.stateChangeLister = stateChangeLister;
 
-        if (data.getLast() == EOF) {
+        if (!data.isEmpty() && data.getLast() == EOF) {
             stateChangeLister.onAllDataRead();
         }
 
-        if (data.getLast() == ERROR) {
+        if (!data.isEmpty() && data.getLast() == ERROR) {
             stateChangeLister.onError(t);
         }
     }
