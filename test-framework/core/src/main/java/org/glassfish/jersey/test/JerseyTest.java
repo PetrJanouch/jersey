@@ -62,6 +62,7 @@ import javax.ws.rs.core.Response;
 import javax.ws.rs.core.UriBuilder;
 
 import org.glassfish.jersey.client.ClientConfig;
+import org.glassfish.jersey.client.spi.ConnectorProvider;
 import org.glassfish.jersey.filter.LoggingFilter;
 import org.glassfish.jersey.internal.ServiceFinder;
 import org.glassfish.jersey.internal.util.PropertiesHelper;
@@ -154,6 +155,8 @@ public abstract class JerseyTest {
      * and class loading.
      */
     private static Class<? extends TestContainerFactory> defaultTestContainerFactoryClass;
+
+    private static Class<? extends ConnectorProvider> defaultTestConnectorProviderClass;
 
     /**
      * Configured deployment context for the tested application.
@@ -538,6 +541,40 @@ public abstract class JerseyTest {
         }
     }
 
+    private static synchronized ConnectorProvider getDefaultTestConnectorProvider() {
+        if (defaultTestConnectorProviderClass == null) {
+            String connectorClassName = getSystemProperty(TestProperties.CONNECTOR_PROVIDER);
+
+            if (connectorClassName == null) {
+                return null;
+            }
+
+            defaultTestConnectorProviderClass = loadConnectorProviderClass(connectorClassName);
+        }
+
+        try {
+            return defaultTestConnectorProviderClass.newInstance();
+        } catch (final Exception ex) {
+            throw new TestContainerException(String.format(
+                    "Could not instantiate test connector provider '%s'", defaultTestConnectorProviderClass.getName()), ex);
+        }
+    }
+
+    private static Class<? extends ConnectorProvider> loadConnectorProviderClass(String providerClassName) {
+        Class<? extends TestContainerFactory> factoryClass;
+        final Class<Object> loadedClass = AccessController.doPrivileged(ReflectionHelper.classForNamePA(providerClassName, null));
+        if (loadedClass == null) {
+            throw new TestContainerException(String.format(
+                    "Test connector provider class '%s' cannot be loaded", providerClassName));
+        }
+        try {
+            return loadedClass.asSubclass(ConnectorProvider.class);
+        } catch (final ClassCastException ex) {
+            throw new TestContainerException(String.format(
+                    "Class '%s' does not implement ConnectorProvider SPI.", providerClassName), ex);
+        }
+    }
+
     private static Class<? extends TestContainerFactory> loadFactoryClass(final String factoryClassName) {
         Class<? extends TestContainerFactory> factoryClass;
         final Class<Object> loadedClass = AccessController.doPrivileged(ReflectionHelper.classForNamePA(factoryClassName, null));
@@ -685,7 +722,16 @@ public abstract class JerseyTest {
             clientConfig.register(new LoggingFilter(LOGGER, isEnabled(TestProperties.DUMP_ENTITY)));
         }
 
+        ConnectorProvider defaultConnectorProvider = clientConfig.getConnectorProvider();
         configureClient(clientConfig);
+
+        if (clientConfig.getConnectorProvider() == defaultConnectorProvider) {
+            ConnectorProvider defaultTestConnectorProvider = getDefaultTestConnectorProvider();
+
+            if (defaultTestConnectorProvider != null) {
+                clientConfig.connectorProvider(defaultTestConnectorProvider);
+            }
+        }
 
         return ClientBuilder.newClient(clientConfig);
     }

@@ -151,6 +151,8 @@ public final class TestProperties {
      */
     public static final String ASYNC_TIMEOUT_MULTIPLIER = "jersey.config.test.async.timeout.multiplier";
 
+    public static final String CONNECTOR_PROVIDER = "jersey.config.test.connector.provider";
+
     private TestProperties() {
         // prevents instantiation
     }

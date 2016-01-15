@@ -101,6 +101,7 @@ class JdkConnector implements Connector {
 
     @Override
     public Future<?> apply(final ClientRequest request, final AsyncConnectorCallback callback) {
+        System.out.println("================  USING JDK CONNECTOR  ================");
         final SettableFuture<ClientResponse> responseFuture = SettableFuture.create();
         // just so we don't have to drag around both the future and callback
         final AsyncConnectorCallback internalCallback = new AsyncConnectorCallback() {
